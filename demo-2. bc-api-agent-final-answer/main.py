@@ -92,6 +92,7 @@ def main():
 
     groupchat_result = user_proxy.initiate_chat(
         manager,
+        message="List me all unpaid sales invoices for the last year"
     )
 
 if __name__ == "__main__":

@@ -53,7 +53,7 @@ def main():
         max_consecutive_auto_reply=2,
     )
 
-    user_proxy_agent.initiate_chat(bc_api_agent, message="list all customers")
+    user_proxy_agent.initiate_chat(bc_api_agent, message="List me CoA")
 
 if __name__ == "__main__":
     main()
