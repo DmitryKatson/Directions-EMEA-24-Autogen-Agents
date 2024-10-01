@@ -87,4 +87,5 @@ Make sure to:
 - Correct any errors based on the API response.
 - Output should be in a one single python code block, without any extra comments.
 
+When you find an answer after python code execution, verify the answer and if there are no errors answer in natural language. 
 Reply 'TERMINATE' in the end when everything is done.
