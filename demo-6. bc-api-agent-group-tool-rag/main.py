@@ -5,6 +5,7 @@ from bc_api_tool import call_business_central_api
 from autogen.agentchat.contrib.retrieve_user_proxy_agent import RetrieveUserProxyAgent
 from chromadb.utils import embedding_functions
 from qdrant_client import QdrantClient
+from typing import Annotated
 
 dotenv.load_dotenv()
 
@@ -84,6 +85,26 @@ def main():
             description="Assistant who has extra content retrieval power from Qdrant to retrieve Microsoft Dynamics 365 Business Central API documentation"
         )
 
+    def retrieve_content(
+        message: str,
+        n_results: int = 3,
+    ) -> str:
+        rag_agent.n_results = n_results  # Set the number of results to be retrieved.
+        _context = {"problem": message, "n_results": n_results}
+        ret_msg = rag_agent.message_generator(rag_agent, None, _context)
+        return ret_msg or message
+
+    rag_agent.human_input_mode = "NEVER"  # Disable human input for rag_agent since it only retrieves content.
+
+    # Register the retrieve_content function using autogen.register_function
+    autogen.register_function(
+        retrieve_content,
+        caller=bc_api_assistant,
+        executor=user_proxy,
+        name="retrieve_content",
+        description="Retrieve content for code generation and question answering from the RAG agent.",
+    )
+
     autogen.register_function(
         call_business_central_api,
         caller=bc_api_assistant,
@@ -93,31 +114,21 @@ def main():
     )
 
     groupchat = autogen.GroupChat(
-        agents=[user_proxy, rag_agent, bc_api_assistant],
+        agents=[user_proxy, bc_api_assistant],
         messages=[],
         max_round=10,
-        # allowed_or_disallowed_speaker_transitions={
-        #     user_proxy: [bc_api_assistant],
-        #     bc_api_assistant: [rag_agent, user_proxy],
-        # },
-        # speaker_transitions_type="allowed",
+        speaker_selection_method="round_robin",
+        allow_repeat_speaker=False
     )
 
     manager = autogen.GroupChatManager(
         groupchat=groupchat, llm_config=llm_config
     )
 
-    # user_proxy.initiate_chat(
-    #     manager,
-    #     message="Which customers owes money to the company?"
-    # )
-
-    rag_agent.initiate_chat(
+    user_proxy.initiate_chat(
         manager,
-        message=rag_agent.message_generator,
-        problem="Which customers owes money to the company?"
+        message="Which customers owes money to the company?"
     )
-
 
 if __name__ == "__main__":
     main()
