@@ -1,0 +1,4 @@
+chromadb
+autogen
+qdrant_client
+protobuf==3.20.3

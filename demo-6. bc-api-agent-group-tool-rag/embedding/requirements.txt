@@ -1,0 +1,7 @@
+python-dotenv
+PyPDF2
+qdrant-client
+langchain-openai
+openai
+tenacity
+langchain-community
