@@ -75,7 +75,7 @@ def main():
                     "content_payload_key": "page_content",
                     "metadata_payload_key": "metadata",
                 },
-                "collection_name": "bc_api_docs",
+                "collection_name": os.environ.get("QDRANT_COLLECTION"),
                 "embedding_function": openai_ef,
                 "distance_threshold": 0.77,
                 "n_results": 5,
