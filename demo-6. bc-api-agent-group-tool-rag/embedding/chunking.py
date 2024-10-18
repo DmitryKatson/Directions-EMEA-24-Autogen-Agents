@@ -1,5 +1,6 @@
 import re
 import PyPDF2
+import os
 from tqdm import tqdm
 
 def extract_text_from_pdf(file_path):
@@ -36,7 +37,7 @@ def chunk_by_chapters(text):
     if chapters:
         for i in tqdm(range(len(chapters)), desc="Chunking chapters", unit="chapter"):
             match = chapters[i]
-            chapter_title = match.group(0).strip()  # Get the chapter title (e.g., "CHAPTER 1:")
+            chapter_title = match.group(0).strip().rstrip(':')  # Get the chapter title (e.g., "CHAPTER 1")
             start_pos = match.end()  # Position where the chapter content starts
 
             # Determine where this chapter ends:
@@ -58,11 +59,13 @@ def chunk_by_chapters(text):
     return chapter_chunks
 
 def process_pdf(file_path):
-    print(f"Processing PDF: {file_path}")
+    file_name = os.path.basename(file_path)
+    print(f"Reading {file_name} ... 📚")    
     print("-" * 50)
 
     full_text = extract_text_from_pdf(file_path)
-    print("Chunking text into chapters...")
+    print("Okay, now I'll prepare to remember this! 🧠💪")
+    print("Chunking into chapters...")
     print("-" * 50)
 
     return chunk_by_chapters(full_text)
