@@ -82,7 +82,7 @@ def delete_vectors_by_source(client, collection_name, file_name):
             filter=models.Filter(
                 must=[
                     models.FieldCondition(
-                        key="source",
+                        key="metadata.source",
                         match=models.MatchValue(value=file_name)
                     )
                 ]
