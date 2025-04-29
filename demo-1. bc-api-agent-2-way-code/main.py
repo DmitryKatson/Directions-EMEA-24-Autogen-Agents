@@ -1,30 +1,31 @@
-import autogen
+import asyncio
 import os
 import dotenv
+from autogen_agentchat.agents import AssistantAgent, CodeExecutorAgent
+from autogen_agentchat.teams import RoundRobinGroupChat
+from autogen_agentchat.conditions import MaxMessageTermination, TextMentionTermination
+from autogen_agentchat.ui import Console
+from autogen_ext.code_executors.local import LocalCommandLineCodeExecutor
+from autogen_ext.models.openai import AzureOpenAIChatCompletionClient
+from autogen_core import CancellationToken
 
 dotenv.load_dotenv()
 
-def main():
+async def main():
     # Get the directory of the current script
     script_dir = os.path.dirname(os.path.abspath(__file__))
     
-    # Create the LLM config
-    config_list = [
-        {
-            "model": os.environ.get("AZURE_OPENAI_API_MODEL"),  # Specify your Azure OpenAI deployment name
-            "api_key": os.environ.get("AZURE_OPENAI_API_KEY"),  # API Key from environment variable
-            "base_url": os.environ.get("AZURE_OPENAI_API_BASE"),  # Base URL for Azure OpenAI
-            "api_type": "azure",  # Specify the API type as Azure
-            "api_version": os.environ.get("AZURE_OPENAI_API_VERSION"),  # API version
-            "max_tokens": 4000,  # Maximum tokens for the response
-        }
-    ]
-
-    llm_config = {
-        "config_list": config_list,
-        "temperature": 0,  # Controls randomness in responses
-        "timeout": 120,  # Timeout for requests
-    }
+    # Create the model client for Azure OpenAI
+    model_client = AzureOpenAIChatCompletionClient(
+        azure_deployment=os.environ.get("AZURE_OPENAI_API_MODEL"),
+        azure_endpoint=os.environ.get("AZURE_OPENAI_API_BASE"),
+        model=os.environ.get("AZURE_OPENAI_API_MODEL"),
+        api_version=os.environ.get("AZURE_OPENAI_API_VERSION"),
+        api_key=os.environ.get("AZURE_OPENAI_API_KEY"),
+        temperature=0,
+        max_tokens=4000,
+        timeout=120,
+    )
 
     # Construct the path to the system message file
     system_message_path = os.path.join(script_dir, 'bc_api_agent_system_message.txt')
@@ -33,27 +34,31 @@ def main():
     with open(system_message_path, 'r') as file:
         bc_api_agent_system_message = file.read()
 
-    # Set the max turns for the conversation
-    max_turns = 4
-
     # Create the Business Central API agent
-    bc_api_agent = autogen.AssistantAgent(
+    bc_api_agent = AssistantAgent(
         name="bc_api_agent",
         description="Business Central API agent. Responsible to choose and configure the API call",
-        llm_config=llm_config,
-        code_execution_config=False,
-        human_input_mode="NEVER",
         system_message=bc_api_agent_system_message,
-        max_consecutive_auto_reply=max_turns,
+        model_client=model_client,
     )
 
-    # Create the user proxy agent
-    user_proxy_agent = autogen.UserProxyAgent(
-        name="user_proxy_agent",
-        llm_config=False,
-        code_execution_config={"work_dir": os.path.join(script_dir, 'coding'), "use_docker": False},
-        human_input_mode="NEVER",
-        max_consecutive_auto_reply=max_turns,
+    # Create the code executor agent
+    code_executor_agent = CodeExecutorAgent(
+        name="user_proxy_agent", 
+        code_executor=LocalCommandLineCodeExecutor(work_dir=os.path.join(script_dir, 'coding')),
+    )
+
+    # Set up combined termination conditions
+    max_message_termination = MaxMessageTermination(8)
+    text_termination = TextMentionTermination("TERMINATE")
+    
+    # Use OR operator (|) to stop if either condition is met
+    termination = max_message_termination | text_termination
+
+    # Set up the group chat
+    group_chat = RoundRobinGroupChat(
+        [bc_api_agent, code_executor_agent], 
+        termination_condition=termination
     )
 
     # Demo 1: List me the Cash CoA
@@ -62,11 +67,15 @@ def main():
     # Demo 2: List me the Profit & Loss CoA
     # message = "List me the Profit & Loss CoA"
 
-    # Start the conversation
-    user_proxy_agent.initiate_chat(bc_api_agent, message=message)
+    # Start the conversation with streaming output
+    stream = group_chat.run_stream(task=message)
+    await Console(stream)
+    
+    # Close the connection to the model client
+    await model_client.close()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
 
 
 
