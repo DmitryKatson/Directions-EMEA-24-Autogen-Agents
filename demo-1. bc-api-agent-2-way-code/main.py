@@ -69,7 +69,7 @@ async def main():
 
     # Start the conversation with streaming output
     stream = group_chat.run_stream(task=message)
-    await Console(stream)
+    await Console(stream, output_stats=True)
     
     # Close the connection to the model client
     await model_client.close()
