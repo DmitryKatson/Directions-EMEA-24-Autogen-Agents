@@ -1,18 +1,26 @@
 import asyncio
 import os
 import dotenv
+from typing import List, Tuple
 from autogen_agentchat.agents import AssistantAgent, CodeExecutorAgent
 from autogen_agentchat.teams import RoundRobinGroupChat
 from autogen_agentchat.conditions import MaxMessageTermination, TextMentionTermination
 from autogen_agentchat.ui import Console
+from autogen_agentchat.messages import BaseChatMessage
 from autogen_ext.code_executors.local import LocalCommandLineCodeExecutor
 from autogen_ext.models.openai import AzureOpenAIChatCompletionClient
 from autogen_core import CancellationToken
-import dotenv
 
+# Load environment variables when the module is imported
 dotenv.load_dotenv()
 
-async def main():
+def create_agent_team():
+    """
+    Create and initialize the model client, agents, and group chat for the BC API demo.
+    
+    Returns:
+        Tuple containing model_client, bc_api_agent, executor_agent, and group_chat
+    """
     # Get the directory of the current script
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -45,7 +53,7 @@ async def main():
 
     # Create the code executor agent
     code_executor_agent = CodeExecutorAgent(
-        name="user_proxy_agent", 
+        name="executor_agent",  # Renamed for clarity from user_proxy_agent
         code_executor=LocalCommandLineCodeExecutor(work_dir=os.path.join(script_dir, 'coding')),
     )
 
@@ -61,19 +69,51 @@ async def main():
         [bc_api_agent, code_executor_agent], 
         termination_condition=termination
     )
-
-    # Demo 1: List me the Cash CoA
-    message = "List me the Cash CoA"
-
-    # Demo 2: List me the Profit & Loss CoA
-    # message = "List me the Profit & Loss CoA"
-
-    # Start the conversation with streaming output
-    stream = group_chat.run_stream(task=message)
-    await Console(stream, output_stats=True)
     
-    # Close the connection to the model client
-    await model_client.close()
+    return model_client, bc_api_agent, code_executor_agent, group_chat
+
+async def run_chat(group_chat, prompt: str) -> List[BaseChatMessage]:
+    """
+    Run the agent team chat for a given prompt and collect all messages.
+    
+    Args:
+        group_chat: The RoundRobinGroupChat instance to use
+        prompt: The user prompt to process
+        
+    Returns:
+        List of BaseChatMessage objects from the conversation
+    """
+    print(f"--- Starting run_chat for prompt: '{prompt}' ---")
+    all_messages: List[BaseChatMessage] = []
+    
+    stream = group_chat.run_stream(task=prompt)
+    
+    async for message in stream:
+        if isinstance(message, BaseChatMessage):
+            all_messages.append(message)
+            # No need to print here since this would duplicate console output
+    
+    print(f"--- run_chat finished. Collected {len(all_messages)} messages. ---")
+    return all_messages
+
+async def main():
+    """Main function for running as a standalone script"""
+    # Create agents and team
+    model_client, bc_api_agent, executor_agent, group_chat = create_agent_team()
+
+    try:
+        # Demo 1: List me the Cash CoA
+        message = "List me the Cash CoA"
+
+        # Demo 2: List me the Profit & Loss CoA
+        # message = "List me the Profit & Loss CoA"
+
+        # Start the conversation with streaming output
+        stream = group_chat.run_stream(task=message)
+        await Console(stream, output_stats=True)
+    finally:
+        # Ensure model client is closed even if an exception occurs
+        await model_client.close()
 
 if __name__ == "__main__":
     asyncio.run(main())
