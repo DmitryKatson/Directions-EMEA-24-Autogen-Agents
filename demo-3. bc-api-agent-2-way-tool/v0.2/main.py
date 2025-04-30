@@ -34,7 +34,10 @@ def main():
         code_execution_config=False,
         llm_config=llm_config,
         human_input_mode="NEVER",
-        max_consecutive_auto_reply=4,
+        max_consecutive_auto_reply=10,
+        system_message="You are a helpful AI assistant specialized in Business Central. "
+                        "Answer the user's question based on the information provided by the Business Central API agent."
+                        "When the task is complete, return 'TERMINATE' on a new line.",
     )
 
     # Create the Business Central API agent
@@ -45,9 +48,8 @@ def main():
         code_execution_config=False,
         human_input_mode="NEVER",
         system_message="You are a helpful AI assistant specialized in Business Central API. "
-                       "You can help with querying Business Central data using the provided API tool. "
-                       "Return 'TERMINATE' when the task is done.",        
-        max_consecutive_auto_reply=4,
+                       "You can help with querying Business Central data using the provided API tool. ",
+        max_consecutive_auto_reply=10,
     )
 
     # Register the Business Central API function to the two agents
