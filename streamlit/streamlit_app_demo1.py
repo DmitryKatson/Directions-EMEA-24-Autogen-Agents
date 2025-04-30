@@ -7,29 +7,57 @@ import json
 import re
 import ast # Re-import ast
 
+# --- Configuration ---
+DEMO_CONFIG = {
+    "demo1": {
+        "name": "Demo 1: Code + Executor",
+        "path": os.path.join("demo-1. bc-api-agent-2-way-code", "v0.4", "main.py"),
+        "prompts": ["List me the Cash CoA", "Get Customer details for customer number 10000"],
+        "caption": "Using AssistantAgent + CodeExecutorAgent (2 Agents)"
+    },
+    "demo2": {
+        "name": "Demo 2: Coder + Executor + Composer",
+        "path": os.path.join("demo-2. bc-api-agent-group-code", "v0.4", "main.py"),
+        "prompts": ["List me all unpaid sales invoices for the last year", "Get details for customer 10000"],
+         "caption": "Using SelectorGroupChat (3 Agents, LLM selects next)"
+    }
+}
+DEFAULT_DEMO = "demo1"
+
+# --- Utility Functions ---
+
 # Set the asyncio policy for Windows
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
-# Directly import from the module path
-# Go up one level from the current file's directory (streamlit) to the workspace root, then construct the path
-workspace_root = os.path.dirname(os.path.dirname(__file__))
-main_path = os.path.join(workspace_root, "demo-1. bc-api-agent-2-way-code", "v0.4", "main.py")
-# Check if the path exists for debugging
-if not os.path.exists(main_path):
-    print(f"ERROR: Calculated main_path does not exist: {main_path}") # Add a check
-    # Optionally raise an error or handle it appropriately
-    # raise FileNotFoundError(f"Could not find main.py at {main_path}")
-spec = importlib.util.spec_from_file_location("main_module", main_path)
-main_module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(main_module)
-create_agent_team = main_module.create_agent_team
-run_chat = main_module.run_chat
+def load_demo_module(demo_id):
+    """Dynamically loads the main module for the selected demo."""
+    config = DEMO_CONFIG.get(demo_id)
+    if not config:
+        st.error(f"Invalid demo ID: {demo_id}")
+        return None, None
+
+    # Construct path relative to the workspace root (one level up from this script's dir)
+    workspace_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    main_path = os.path.join(workspace_root, config["path"])
+
+    if not os.path.exists(main_path):
+        st.error(f"Could not find main.py for {config['name']} at: {main_path}")
+        return None, None
+
+    try:
+        spec = importlib.util.spec_from_file_location(f"main_module_{demo_id}", main_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module.create_agent_team, module.run_chat
+    except Exception as e:
+        st.error(f"Failed to load module for {config['name']}: {e}")
+        return None, None
 
 def display_message(message):
     """Displays messages, attempting to format Python literals or JSON within text."""
-    role = message["role"]
-    content = message["content"]
+    role = message.get("role", "unknown")
+    content = message.get("content", "")
 
     with st.chat_message(role):
         # Handle existing markdown code blocks first
@@ -41,99 +69,126 @@ def display_message(message):
              st.markdown(content)
              return
 
-        # --- Attempt to find and format Python literal / JSON ---
-        # Regex to find a structure starting with { or [ potentially after some text
+        # Attempt to find and format Python literal / JSON
         match = re.search(r'(.*?)(\[.*?\]|\{.*?\})', content, re.DOTALL)
-
         if match:
             prefix = match.group(1).strip()
-            literal_str = match.group(2) # The potential dict/list string
+            literal_str = match.group(2)
             parsed_data = None
-
-            # 1. Try parsing as Python literal using ast.literal_eval (safer for Python dicts/lists)
-            try:
-                # ast.literal_eval safely evaluates a string containing a Python literal
+            try: # Prioritize ast.literal_eval
                 parsed_data = ast.literal_eval(literal_str)
-            except (ValueError, SyntaxError, MemoryError, TypeError):
-                 # If ast fails, proceed to try JSON conversion
-                 parsed_data = None
-            except Exception: # Catch any other unexpected errors from ast
-                 parsed_data = None
-
-
-            # 2. If ast failed, try converting to JSON format and parsing
-            if parsed_data is None:
+            except: # Fallback to JSON conversion
                 try:
-                    # Convert Python bool/None and single quotes to JSON standard
                     json_str = literal_str.replace("'", '"')
                     json_str = re.sub(r'\bNone\b', 'null', json_str)
                     json_str = re.sub(r'\bTrue\b', 'true', json_str)
                     json_str = re.sub(r'\bFalse\b', 'false', json_str)
-                    # Parse the converted string as JSON
                     parsed_data = json.loads(json_str)
-                except Exception:
-                    # If JSON conversion/parsing also fails, give up
+                except:
                     parsed_data = None
 
-            # If parsing succeeded using either method, display prefix + formatted data
             if parsed_data is not None:
-                if prefix:
-                    st.markdown(prefix)
-                # Use st.json for built-in formatting of the parsed data
+                if prefix: st.markdown(prefix)
                 st.json(parsed_data)
-                return # Stop processing, we're done
+                return
 
-        # --- Fallback ---
-        # If no structure found by regex, or if all parsing attempts failed
+        # Fallback for everything else
         st.markdown(content)
 
+def reset_chat_state():
+    """Clears messages and agent components from session state."""
+    st.session_state.messages = []
+    if "internal_messages" in st.session_state:
+        del st.session_state["internal_messages"]
+    if "agent_components" in st.session_state:
+        del st.session_state["agent_components"] # Remove old components
+
+# --- Main Streamlit App ---
 def main():
-    st.set_page_config(page_title="BC API Agent Demo", page_icon="🤖")
-    st.title("BC API Agent Demo")
-    st.caption("Business Central API Code Generation Assistant")
+    st.set_page_config(page_title="AutoGen BC API Demos", page_icon="🤖", layout="wide")
+
+    # --- Sidebar for Demo Selection ---
+    st.sidebar.title("Demo Selection")
+    # Use demo names for display, store demo ID
+    demo_options = {demo_id: config["name"] for demo_id, config in DEMO_CONFIG.items()}
+    selected_demo_id = st.sidebar.selectbox(
+        "Choose a Demo:",
+        options=list(demo_options.keys()),
+        format_func=lambda demo_id: demo_options[demo_id],
+        key="selected_demo_selector", # Use a distinct key for the widget
+        index=list(demo_options.keys()).index(st.session_state.get("selected_demo", DEFAULT_DEMO)) # Set default index
+    )
+
+    # --- Handle Demo Change ---
+    # Check if the selection changed compared to the stored state
+    if st.session_state.get("selected_demo") != selected_demo_id:
+        st.session_state.selected_demo = selected_demo_id
+        reset_chat_state() # Reset state when demo changes
+        st.rerun() # Rerun immediately to load new demo config/prompts
+
+    # Ensure selected_demo is initialized in state if it wasn't already
+    if "selected_demo" not in st.session_state:
+         st.session_state.selected_demo = selected_demo_id # Usually DEFAULT_DEMO on first run
+
+    # --- Load Config for Selected Demo ---
+    current_config = DEMO_CONFIG[st.session_state.selected_demo]
+    st.title(current_config["name"])
+    st.caption(current_config["caption"])
+
+    # --- Load Demo Modules ---
+    # We load these every time, but only initialize agents if needed
+    create_agent_team_func, run_chat_func = load_demo_module(st.session_state.selected_demo)
+    if not create_agent_team_func or not run_chat_func:
+        st.error("Failed to load necessary functions for the selected demo. Please check paths and files.")
+        st.stop()
 
     # --- Example Prompts / Pills ---
-    example_prompts = ["List me the Cash CoA"]
+    st.markdown("##### Try an example:")
+    example_prompts = current_config["prompts"]
     cols = st.columns(len(example_prompts))
     for i, example_prompt in enumerate(example_prompts):
-        if cols[i].button(example_prompt, key=f"example_{i}"):
-            # Add the example prompt to messages and trigger rerun
+        # Use demo_id in the key to ensure buttons are unique across demos
+        if cols[i].button(example_prompt, key=f"example_{st.session_state.selected_demo}_{i}"):
+            reset_chat_state() # Reset before starting new chat with example
             st.session_state.messages.append({"role": "user", "content": example_prompt})
-            if "internal_messages" in st.session_state:
-                del st.session_state["internal_messages"]
             st.rerun()
-    # --- End Example Prompts ---
 
+    # --- Initialize State (Messages & Agents) ---
+    if "messages" not in st.session_state:
+         st.session_state.messages = []
 
-    # Initialize agent components and chat history
+    # Initialize agent components *only* if they don't exist for the current session
     if "agent_components" not in st.session_state:
         try:
-            model_client, bc_api_agent, executor_agent, group_chat = create_agent_team()
+            # Call the dynamically loaded create_agent_team function
+            # Unpack carefully, only store what's needed universally (group_chat)
+            # Demo 1 returns 4 items, Demo 2 returns 5. We only need group_chat.
+            returned_items = create_agent_team_func()
+            model_client = returned_items[0] # Assume model_client is always first
+            group_chat = returned_items[-1] # Assume group_chat is always last
+
             st.session_state["agent_components"] = {
-                "model_client": model_client,
+                # "model_client": model_client, # Optional: Store if needed e.g. for cleanup
                 "group_chat": group_chat
             }
         except Exception as e:
-            st.error(f"Failed to initialize agent team: {e}")
+            st.error(f"Failed to initialize agent team for {current_config['name']}: {e}")
+            if "agent_components" in st.session_state: del st.session_state.agent_components # Clean up partial init
             st.stop()
 
-        # Initialize messages only if agent components are successfully initialized
-        if "messages" not in st.session_state:
-             st.session_state["messages"] = []
-
-    # Display chat history
+    # --- Display Chat History ---
     for message in st.session_state.get("messages", []):
         display_message(message)
 
-    # Chat input
-    prompt = st.chat_input("Ask about Business Central data...") # Updated placeholder text
+    # --- Chat Input ---
+    prompt = st.chat_input(f"Ask about Business Central data ({st.session_state.selected_demo})...")
     if prompt:
         st.session_state.messages.append({"role": "user", "content": prompt})
         if "internal_messages" in st.session_state:
             del st.session_state["internal_messages"]
         st.rerun()
 
-    # Process new messages if the last message was from the user
+    # --- Process New User Messages ---
     if (st.session_state.get("messages") and
             st.session_state.messages[-1]["role"] == "user" and
             "internal_messages" not in st.session_state):
@@ -141,34 +196,25 @@ def main():
         user_prompt = st.session_state.messages[-1]["content"]
         group_chat = st.session_state.agent_components["group_chat"]
 
-        with st.spinner("Processing..."):
+        with st.spinner(f"Processing with {current_config['name']}..."):
             try:
-                # Run the chat
-                response_messages = asyncio.run(run_chat(group_chat, user_prompt))
+                # Use the dynamically loaded run_chat function
+                response_messages = asyncio.run(run_chat_func(group_chat, user_prompt))
 
-                # Process responses
+                # Process responses (same logic as before)
                 internal_messages_processed = []
                 final_answer_content = "No response generated."
-
                 for i, msg in enumerate(response_messages):
-                    role = "system"
-                    content = "Error getting content"
+                    role = "system"; content = "Error getting content"
                     try:
-                        if hasattr(msg.source, 'name') and isinstance(msg.source.name, str):
-                            role = msg.source.name
-                        elif isinstance(msg.source, str):
-                             role = msg.source
-                    except AttributeError:
-                        role = "unknown_source"
-
-                    try:
-                        content = msg.to_text() if hasattr(msg, 'to_text') else str(msg)
-                    except Exception as content_e:
-                         content = f"Error getting content for message {i}: {content_e}"
-
+                        if hasattr(msg.source, 'name') and isinstance(msg.source.name, str): role = msg.source.name
+                        elif isinstance(msg.source, str): role = msg.source
+                    except AttributeError: role = "unknown_source"
+                    try: content = msg.to_text() if hasattr(msg, 'to_text') else str(msg)
+                    except Exception as content_e: content = f"Error getting content for message {i}: {content_e}"
                     internal_messages_processed.append({"role": role, "content": content})
-
-                    if role in ["bc_api_agent", "executor_agent"]:
+                    # Heuristic for final answer (might need adjustment depending on demo's last speaker)
+                    if role in ["bc_api_agent", "executor_agent", "Answer_Composer_Agent"]: # Cover both demos
                         final_answer_content = content
 
                 # Store results
@@ -181,8 +227,7 @@ def main():
                 st.session_state["internal_messages"] = [{"role": "system", "content": f"Error: {e}"}]
                 st.rerun()
 
-
-    # Display internal messages in an expander
+    # --- Display Internal Messages Expander ---
     if "internal_messages" in st.session_state:
         with st.expander("View Processing Details", expanded=False):
             for message in st.session_state.internal_messages:
