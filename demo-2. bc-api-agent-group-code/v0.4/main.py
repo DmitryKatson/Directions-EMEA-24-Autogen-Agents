@@ -54,8 +54,8 @@ async def main():
     # Create the answer composer agent
     answer_composer_agent = AssistantAgent(
         name="Answer_Composer_Agent",
-        description="Answer composer agent. Responsible to compose the answer from the API call",
-        system_message="You are a helpful assistant that composes the answer from the API call. Be concise and accurate. End your final answer with 'TASK_COMPLETE' on a new line when the task is complete.",
+        description="Answer composer agent. Responsible to compose the the final answer to the user's question",
+        system_message="You are a helpful assistant that composes the the final answer to the user's question. Be concise and accurate. End your final answer with 'TASK_COMPLETE' on a new line when the task is complete.",
         model_client=model_client,
     )
     
