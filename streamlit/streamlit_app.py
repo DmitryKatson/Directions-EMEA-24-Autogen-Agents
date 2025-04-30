@@ -12,13 +12,13 @@ DEMO_CONFIG = {
     "demo1": {
         "name": "Demo 1: Code + Executor",
         "path": os.path.join("demo-1. bc-api-agent-2-way-code", "v0.4", "main.py"),
-        "prompts": ["List me the Cash CoA", "Get Customer details for customer number 10000"],
+        "prompts": ["List me the Cash CoA"],
         "caption": "Using AssistantAgent + CodeExecutorAgent (2 Agents)"
     },
     "demo2": {
         "name": "Demo 2: Coder + Executor + Composer",
         "path": os.path.join("demo-2. bc-api-agent-group-code", "v0.4", "main.py"),
-        "prompts": ["List me all unpaid sales invoices for the last year", "Get details for customer 10000"],
+        "prompts": ["List me all unpaid sales invoices for the last year"],
          "caption": "Using SelectorGroupChat (3 Agents, LLM selects next)"
     }
 }
