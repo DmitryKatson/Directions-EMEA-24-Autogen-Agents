@@ -1,6 +1,6 @@
 import os
 import time
-from dotenv import load_dotenv
+import dotenv
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, Filter, FilterSelector, FieldCondition, MatchValue
 from langchain_openai import AzureOpenAIEmbeddings
@@ -16,9 +16,9 @@ def load_ascii_art(file_path):
     with open(file_path, 'r') as file:
         return file.read()
 
-# Load .env file from the correct path
-dotenv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env')
-load_dotenv(dotenv_path)
+# Load .env file from the current directory or parent directories
+dotenv.load_dotenv()
+script_dir = os.path.dirname(os.path.abspath(__file__)) # Keep for later use
 
 def initialize_qdrant():
     print("Freeing my mind.. 🧘")

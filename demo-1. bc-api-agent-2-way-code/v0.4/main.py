@@ -8,13 +8,14 @@ from autogen_agentchat.ui import Console
 from autogen_ext.code_executors.local import LocalCommandLineCodeExecutor
 from autogen_ext.models.openai import AzureOpenAIChatCompletionClient
 from autogen_core import CancellationToken
+import dotenv
 
 dotenv.load_dotenv()
 
 async def main():
     # Get the directory of the current script
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    
+
     # Create the model client for Azure OpenAI
     model_client = AzureOpenAIChatCompletionClient(
         azure_deployment=os.environ.get("AZURE_OPENAI_API_MODEL"),

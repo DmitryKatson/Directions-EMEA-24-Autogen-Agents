@@ -10,6 +10,8 @@ from typing import Annotated
 dotenv.load_dotenv()
 
 def main():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+
     config_list = [
         {
             "model": os.environ.get("AZURE_OPENAI_API_MODEL"),

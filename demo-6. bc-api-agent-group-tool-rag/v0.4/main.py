@@ -18,12 +18,11 @@ from langchain_openai import AzureOpenAIEmbeddings
 # Tool import
 from bc_api_tool import call_business_central_api
 
-# Load environment variables
-# Assuming .env is one level up from v0.4 dir
-dotenv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '.env') 
-dotenv.load_dotenv(dotenv_path=dotenv_path, override=True)
+dotenv.load_dotenv()
 
 async def main():
+
+    script_dir = os.path.dirname(os.path.abspath(__file__))
 
     # === Model Client Setup ===
     model_client = AzureOpenAIChatCompletionClient(
