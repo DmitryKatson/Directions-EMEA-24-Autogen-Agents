@@ -71,7 +71,7 @@ async def main():
                 collection_name=qdrant_collection_name,
                 query_vector=query_vector,
                 limit=3,  # Retrieve top 3 results
-                # score_threshold=0.5, # Optional: set a score threshold 
+                score_threshold=0.7, # Optional: set a score threshold 
                 with_payload=True # Ensure payload (like page_content) is returned
             )
             
