@@ -24,25 +24,35 @@ def initialize_qdrant():
     print("Freeing my mind.. 🧘")
     qdrant_url = os.getenv('QDRANT_URL')
     qdrant_key = os.getenv('QDRANT_API_KEY')
-    qdrant_collection = os.getenv('QDRANT_COLLECTION')
-
+    qdrant_collection = os.getenv('QDRANT_COLLECTION')    
     client = QdrantClient(url=qdrant_url, api_key=qdrant_key, prefer_grpc=True, timeout=30)
     
     try:
         collections = client.get_collections()
         collection_names = [collection.name for collection in collections.collections]
         
-        if qdrant_collection not in collection_names:
+        collection_exists = qdrant_collection in collection_names
+        if not collection_exists:
             print(f"Collection '{qdrant_collection}' doesn't exist. Creating it now.")
             client.create_collection(
                 collection_name=qdrant_collection,
-                vectors_config=VectorParams(size=1536, distance=Distance.COSINE),
+                vectors_config=models.VectorParams(size=1536, distance=models.Distance.COSINE), # Assuming size 1536 and Cosine
             )
             print(f"Collection '{qdrant_collection}' created.")
         # else:
-        #     print(f"Collection '{qdrant_collection}' already exists.")
+            # print(f"Collection '{qdrant_collection}' already exists.")
+
+        # Ensure the payload index exists for metadata.source
+        print(f"Ensuring payload index exists for 'metadata.source' in collection '{qdrant_collection}'...")
+        client.create_payload_index(
+            collection_name=qdrant_collection,
+            field_name="metadata.source",
+            field_schema=models.PayloadSchemaType.KEYWORD # Use PayloadSchemaType for keyword index
+        )
+        print("Payload index for 'metadata.source' ensured.")
+            
     except Exception as e:
-        print(f"Error while initializing Qdrant: {e}")
+        print(f"Error while initializing Qdrant or creating index: {e}")
         raise
 
     embeddings = AzureOpenAIEmbeddings(

@@ -5,3 +5,4 @@ langchain-openai
 openai
 tenacity
 langchain-community
+langchain_qdrant

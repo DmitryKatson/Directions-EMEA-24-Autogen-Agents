@@ -36,6 +36,7 @@ def main():
     openai_ef = embedding_functions.OpenAIEmbeddingFunction(
                     api_key=os.environ.get("AZURE_OPENAI_API_KEY"),
                     model_name=os.environ.get("AZURE_OPENAI_EMBEDDING_MODEL"),
+                    deployment_id=os.environ.get("AZURE_OPENAI_EMBEDDING_MODEL"),
                     api_base=os.environ.get("AZURE_OPENAI_API_BASE"),
                     api_type="azure",
                     api_version=os.environ.get("AZURE_OPENAI_API_VERSION"),
