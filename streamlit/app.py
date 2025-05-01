@@ -6,6 +6,7 @@ import json
 import re
 import ast
 import traceback
+import time # Import time if not already present
 
 # --- Set Page Config (Must be the FIRST Streamlit command) ---
 st.set_page_config(page_title="AutoGen BC API Demos", page_icon="🤖", layout="wide")
@@ -91,6 +92,14 @@ FINAL_ANSWER_AGENTS = {
     "demo2": "Answer_Composer_Agent",
     "demo3": "BC_API_Assistant",
     "demo4": "BC_API_Assistant",
+}
+
+# --- Constants for Demo Images (relative to this app.py file) ---
+DEMO_IMAGES = {
+    "demo1": "../demo1/v04/demo1.png",
+    "demo2": "../demo2/v04/demo2.png",
+    "demo3": None, # No image specified for Demo 3
+    "demo4": "../demo4/v04/demo4.png",
 }
 
 # --- Utility Functions (load_demo_module removed) ---
@@ -324,6 +333,11 @@ def show_embedding_ui():
 
 # --- Main Streamlit App --- 
 def main():
+    # --- Display Toast from previous run (if any) ---
+    if 'toast_summary' in st.session_state:
+        st.toast(st.session_state['toast_summary'], icon="📊")
+        del st.session_state['toast_summary'] # Clear after showing
+        
     # This function is now called after st.set_page_config()
     
     # --- Sidebar for Demo Selection ---
@@ -341,6 +355,18 @@ def main():
         index=default_index
     )
 
+    # --- Display Demo Image in Sidebar --- 
+    image_relative_path = DEMO_IMAGES.get(selected_demo_id)
+    if image_relative_path:
+        # Construct full path relative to the current script
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        image_path = os.path.normpath(os.path.join(script_dir, image_relative_path))
+        if os.path.exists(image_path):
+            st.sidebar.image(image_path, use_container_width=True)
+        else:
+            st.sidebar.warning(f"Image file not found: {image_path}")
+    # --- End Display Demo Image in Sidebar ---
+
     # --- Handle Demo Change ---
     if st.session_state.get("selected_demo") != selected_demo_id:
         st.session_state.selected_demo = selected_demo_id
@@ -356,17 +382,17 @@ def main():
             show_embedding_ui()
 
     # --- Load Config for Selected Demo ---
-    if st.session_state.selected_demo not in DEMO_CONFIG:
-         st.error(f"Selected demo '{st.session_state.selected_demo}' is not configured.")
+    if selected_demo_id not in DEMO_CONFIG:
+         st.error(f"Selected demo '{selected_demo_id}' is not configured.")
          st.stop()
-    current_config = DEMO_CONFIG[st.session_state.selected_demo]
+    current_config = DEMO_CONFIG[selected_demo_id]
     st.title(current_config["name"])
     st.caption(current_config["caption"])
-
+    
     # --- Get Demo Functions (using direct imports) ---
-    create_agent_team_func, run_chat_func = get_demo_functions(st.session_state.selected_demo)
+    create_agent_team_func, run_chat_func = get_demo_functions(selected_demo_id)
     if not create_agent_team_func or not run_chat_func:
-        st.error(f"Failed to load functions for demo '{st.session_state.selected_demo}'. Check imports at the top of the script.")
+        st.error(f"Failed to load functions for demo '{selected_demo_id}'. Check imports at the top of the script.")
         st.stop()
 
     # --- Example Prompts / Pills ---
@@ -414,7 +440,7 @@ def main():
         display_message(message)
 
     # --- Chat Input ---
-    prompt = st.chat_input(f"Ask about Business Central data ({st.session_state.selected_demo})...")
+    prompt = st.chat_input(f"Ask about Business Central data ({selected_demo_id})...")
     if prompt:
         st.session_state.messages.append({"role": "user", "content": prompt})
         if "internal_messages" in st.session_state:
@@ -442,6 +468,30 @@ def main():
                      
                 detailed_logs = asyncio.run(run_chat_func(group_chat, user_prompt))
 
+                # --- Analyze logs for summary --- 
+                agent_turns = 0
+                tool_calls = 0
+                tool_errors = 0
+                for log in detailed_logs:
+                    # We only count TextMessages from non-user sources as agent turns
+                    if log.get("type") == "TextMessage" and log.get("data", {}).get("source") != "user": 
+                        agent_turns += 1
+                    elif log.get("type") == "ToolCallRequestMessage":
+                        tool_calls += len(log.get("data", {}).get("tool_calls", []))
+                    elif log.get("type") == "ToolCallResultMessage":
+                        for result in log.get("data", {}).get("tool_call_results", []):
+                            if result.get("is_error"): 
+                                tool_errors += 1
+                
+                summary_msg = f"Processing complete: {agent_turns} agent message(s)"
+                if tool_calls > 0:
+                     summary_msg += f", {tool_calls} tool call(s)"
+                if tool_errors > 0:
+                     summary_msg += f" ({tool_errors} error(s))"
+                # Store summary for toast on next run instead of showing immediately
+                st.session_state['toast_summary'] = summary_msg 
+                # --- End of summary logic ---
+                
                 # Extract the final assistant message for main display - using dynamic agent name
                 final_answer_content = "No final answer found in logs."
                 expected_final_agent = FINAL_ANSWER_AGENTS.get(selected_demo_id, "assistant") # Fallback
@@ -470,10 +520,13 @@ def main():
                 st.session_state["internal_messages"] = [{"role": "system", "content": f"Error: {e}"}]
                 st.rerun()
 
-    # --- Display Internal Messages Expander ---
+    # --- Display Internal Messages Expander --- Filtered
     if "internal_messages" in st.session_state:
         with st.expander("View Processing Details", expanded=False):
             for message in st.session_state.internal_messages:
+                # Skip displaying the TaskResult event
+                if message.get("type") == "TaskResult":
+                    continue 
                 display_message(message)
 
 if __name__ == "__main__":
