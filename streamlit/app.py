@@ -98,7 +98,7 @@ FINAL_ANSWER_AGENTS = {
 DEMO_IMAGES = {
     "demo1": "../demo1/v04/demo1.png",
     "demo2": "../demo2/v04/demo2.png",
-    "demo3": None, # No image specified for Demo 3
+    "demo3": "../demo3/v04/demo3.png",
     "demo4": "../demo4/v04/demo4.png",
 }
 
