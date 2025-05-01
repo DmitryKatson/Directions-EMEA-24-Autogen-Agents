@@ -7,8 +7,7 @@ from langchain_openai import AzureOpenAIEmbeddings
 from langchain.docstore.document import Document
 from tenacity import retry, wait_random_exponential, stop_after_attempt
 from langchain_qdrant import QdrantVectorStore  # Updated import
-from tqdm import tqdm
-from chunking import process_pdf  # Import the process_pdf function from chunking.py
+from chunking import process_pdf  # Import the modified process_pdf function
 from qdrant_client import models
 
 # Load ASCII art from file
@@ -105,7 +104,8 @@ def delete_vectors_by_source(client, collection_name, file_name):
 def add_documents_to_qdrant(qdrant, documents):
     qdrant.add_documents(documents=documents)
 
-def process_and_embed_pdf(file_path):
+def process_and_embed_pdf(file_path, progress_callback=None):
+    """Processes and embeds PDF, passing progress_callback to sub-functions and using it for batch loop."""
     start_time = time.time()  # Start timing
 
     # Load and display ASCII art
@@ -125,8 +125,8 @@ def process_and_embed_pdf(file_path):
     # First, prepare the collection
     prepare_collection(client, collection_name, file_name)
 
-    # Process PDF using the chunking algorithm from chunking.py
-    chapter_chunks = process_pdf(file_path)
+    # Process PDF using the chunking algorithm from chunking.py, passing callback
+    chapter_chunks = process_pdf(file_path, progress_callback=progress_callback)
     
     # Create documents
     documents = [
@@ -142,10 +142,16 @@ def process_and_embed_pdf(file_path):
     # Split documents into batches of 10
     batch_size = 10
     document_batches = [documents[i:i + batch_size] for i in range(0, len(documents), batch_size)]
+    num_batches = len(document_batches)
     
-    # Add documents to Qdrant in batches
-    for i, batch in enumerate(tqdm(document_batches, desc=f"Embedding docs: {len(documents)}", unit="batch")):
+    # Add documents to Qdrant in batches, using callback
+    if progress_callback:
+        progress_callback(0, num_batches, "Starting document embedding...")
+        
+    for i, batch in enumerate(document_batches):
         add_documents_to_qdrant(qdrant, batch)
+        if progress_callback:
+            progress_callback(i + 1, num_batches, f"Embedding batch {i+1}/{num_batches}")
 
     print("-" * 50)
 
@@ -158,6 +164,11 @@ def process_and_embed_pdf(file_path):
     print("-" * 50)
 
 if __name__ == "__main__":
+    # Example progress callback for standalone execution
+    def print_progress(step, total, description):
+        percent = (step / total) * 100 if total > 0 else 0
+        print(f"PROGRESS: {description} - {step}/{total} ({percent:.2f}%)")
+
     script_dir = os.path.dirname(os.path.abspath(__file__))
     pdf_file_path = os.path.join(script_dir, "Business_Central_API_v2.0_Reference_2nd_Edition.pdf")
-    process_and_embed_pdf(pdf_file_path)
+    process_and_embed_pdf(pdf_file_path, progress_callback=print_progress)

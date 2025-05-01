@@ -167,99 +167,72 @@ def show_embedding_ui():
     3. Once indexed, you can ask specific questions about the document content
     """)
     
-    col1, col2 = st.columns([2, 1])
+    # Removed st.columns to simplify layout after removing env check
     
-    with col1:
-        # File uploader for PDF documents
-        uploaded_file = st.file_uploader("Upload a PDF document for indexing", type="pdf")
-        
-        default_pdf_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                        "demo4", "embedding", "Business_Central_API_v2.0_Reference_2nd_Edition.pdf")
-        
-        use_default_doc = st.checkbox("Use default Business Central API documentation",
-                                     value=os.path.exists(default_pdf_path))
-        
-        if use_default_doc:
-            st.info("Using the default Business Central API v2.0 Reference documentation")
-            file_to_index = default_pdf_path
-            can_index = True
-        elif uploaded_file is not None:
-            # Save the uploaded file temporarily
-            temp_file_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                         "demo4", "embedding", uploaded_file.name)
-            with open(temp_file_path, "wb") as f:
-                f.write(uploaded_file.getbuffer())
-            
-            st.success(f"File saved: {uploaded_file.name}")
-            file_to_index = temp_file_path
-            can_index = True
-        else:
-            can_index = False
+    # File uploader for PDF documents
+    uploaded_file = st.file_uploader("Upload a PDF document for indexing", type="pdf")
     
-    with col2:
-        st.markdown("#### Environment Check")
-        # Check environment variables required for embedding
-        env_vars = {
-            "QDRANT_URL": os.environ.get("QDRANT_URL", ""),
-            "QDRANT_API_KEY": os.environ.get("QDRANT_API_KEY", ""),
-            "QDRANT_COLLECTION": os.environ.get("QDRANT_COLLECTION", ""),
-            "AZURE_OPENAI_EMBEDDING_MODEL": os.environ.get("AZURE_OPENAI_EMBEDDING_MODEL", "")
-        }
+    default_pdf_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                    "demo4", "embedding", "Business_Central_API_v2.0_Reference_2nd_Edition.pdf")
+    
+    use_default_doc = st.checkbox("Use default Business Central API documentation",
+                                 value=os.path.exists(default_pdf_path))
+    
+    if use_default_doc:
+        st.info("Using the default Business Central API v2.0 Reference documentation")
+        file_to_index = default_pdf_path
+        can_index = True
+    elif uploaded_file is not None:
+        # Save the uploaded file temporarily
+        temp_file_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                     "demo4", "embedding", uploaded_file.name)
+        with open(temp_file_path, "wb") as f:
+            f.write(uploaded_file.getbuffer())
         
-        all_vars_set = all(env_vars.values())
-        
-        env_status = {}
-        for var, value in env_vars.items():
-            env_status[var] = "✅ Set" if value else "❌ Missing"
-        
-        st.json(env_status)
-        
-        if not all_vars_set:
-            st.warning("Some required environment variables are missing. Please check your .env file.")
+        st.success(f"File saved: {uploaded_file.name}")
+        file_to_index = temp_file_path
+        can_index = True
+    else:
+        can_index = False
+    
+    # Environment check section removed
     
     # Button to start the embedding process
     if can_index:
         if st.button("Index Document"):
-            with st.spinner("Indexing document... This may take a while."):
-                try:
-                    # Import the embedding module dynamically
-                    # Ensure the embedding directory itself is in the path
-                    embedding_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "demo4", "embedding")
-                    if embedding_dir not in sys.path:
-                        sys.path.insert(0, embedding_dir) # Add to front to prioritize
-                    
-                    # Now import the function
-                    from embedding import process_and_embed_pdf
-                    
-                    # Process and embed the PDF
-                    with st.expander("Indexing Progress", expanded=True):
-                        log_output = st.empty()
-                        old_stdout = sys.stdout
-                        from io import StringIO
-                        captured_output = StringIO()
-                        try:
-                            sys.stdout = captured_output
-                            process_and_embed_pdf(file_to_index)
-                            sys.stdout = old_stdout
-                            log_output.markdown(f"```\n{captured_output.getvalue()}\n```")
-                        except Exception as e:
-                            sys.stdout = old_stdout
-                            log_output.markdown(f"```\nError: {str(e)}\n{captured_output.getvalue()}\n```")
-                            raise e
-                    
-                    st.success("Document indexed successfully! You can now query the RAG system.")
-                    st.markdown("""
-                    ### Try these example queries:
-                    - "How do I filter items by base unit of measure?"
-                    - "What is OData and how is it used in Business Central API?"
-                    - "How can I authenticate to the Business Central API?"
-                    """)
-                except ImportError as ie:
-                    st.error(f"Import Error during embedding: {ie}. Check if 'embedding.py' exists in demo4/embedding.")
-                    st.error(traceback.format_exc())
-                except Exception as e:
-                    st.error(f"Error during indexing: {e}")
-                    st.error(traceback.format_exc())
+            # Use st.progress with callback for detailed updates
+            progress_bar = st.progress(0, text="Starting indexing...")
+            
+            # Define the callback function for progress updates
+            def update_progress(step, total_steps, description):
+                progress = (step / total_steps) if total_steps > 0 else 0
+                progress_bar.progress(progress, text=f"{description} ({step}/{total_steps})")
+                
+            try:
+                # Import the embedding module dynamically
+                # Ensure the embedding directory itself is in the path
+                embedding_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "demo4", "embedding")
+                if embedding_dir not in sys.path:
+                    sys.path.insert(0, embedding_dir) # Add to front to prioritize
+                
+                # Now import the function
+                from embedding import process_and_embed_pdf
+                
+                # Process and embed the PDF - pass the callback function
+                process_and_embed_pdf(file_to_index, progress_callback=update_progress)
+                
+                # Update progress bar to 100% on completion
+                progress_bar.progress(100, text="Indexing Complete!")
+                st.success("Document indexing complete!") # Keep success message
+                
+            except ImportError as ie:
+                progress_bar.empty() # Remove progress bar on error
+                st.error(f"Import Error during embedding: {ie}. Check if 'embedding.py' exists in demo4/embedding.")
+                st.error(traceback.format_exc())
+            except Exception as e:
+                progress_bar.empty() # Remove progress bar on error
+                st.error(f"Error during indexing: {e}")
+                st.error(traceback.format_exc())
     else:
         st.info("Please upload a document or use the default documentation to begin indexing.")
 
@@ -291,6 +264,11 @@ def main():
     if "selected_demo" not in st.session_state:
          st.session_state.selected_demo = selected_demo_id
 
+    # --- Show Embedding UI for Demo 4 in Sidebar ---
+    if st.session_state.selected_demo == "demo4":
+        with st.sidebar.expander("Document Embedding (RAG)", expanded=True):
+            show_embedding_ui()
+
     # --- Load Config for Selected Demo ---
     if st.session_state.selected_demo not in DEMO_CONFIG:
          st.error(f"Selected demo '{st.session_state.selected_demo}' is not configured.")
@@ -298,11 +276,6 @@ def main():
     current_config = DEMO_CONFIG[st.session_state.selected_demo]
     st.title(current_config["name"])
     st.caption(current_config["caption"])
-
-    # --- Show Embedding UI for Demo 4 ---
-    if st.session_state.selected_demo == "demo4":
-        with st.expander("Document Embedding (RAG)", expanded=False):
-            show_embedding_ui()
 
     # --- Get Demo Functions (using direct imports) ---
     create_agent_team_func, run_chat_func = get_demo_functions(st.session_state.selected_demo)
