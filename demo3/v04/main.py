@@ -1,34 +1,38 @@
 import asyncio
 import os
 import sys
-import importlib
 import dotenv
-from autogen_ext.models.openai import AzureOpenAIChatCompletionClient
+from pathlib import Path
+from typing import List, Dict, Any, Tuple
+
+# Core AgentChat components
 from autogen_agentchat.agents import AssistantAgent
 from autogen_agentchat.teams import RoundRobinGroupChat
 from autogen_agentchat.conditions import MaxMessageTermination, TextMentionTermination
 from autogen_agentchat.ui import Console
-from typing import List, Tuple, Callable, Any
 from autogen_agentchat.messages import BaseChatMessage
 
+# Model components
+from autogen_ext.models.openai import AzureOpenAIChatCompletionClient
 from bc_api_tool import call_business_central_api
 
-# Load environment variables
 dotenv.load_dotenv()
 
 def create_agent_team():
     """
-    Creates and initializes the model client, agent, and group chat for the Demo 3 setup.
+    Creates and initializes the model client, agent, termination conditions, 
+    and group chat for the Demo 3 setup.
 
     Returns:
         Tuple containing model_client, bc_api_assistant, and group_chat
     """
-    
-    # Create the model client for Azure OpenAI
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+
+    # === Model Client Setup ===
     model_client = AzureOpenAIChatCompletionClient(
         azure_deployment=os.environ.get("AZURE_OPENAI_API_MODEL"),
         azure_endpoint=os.environ.get("AZURE_OPENAI_API_BASE"),
-        model=os.environ.get("AZURE_OPENAI_API_MODEL"),
+        model=os.environ.get("AZURE_OPENAI_API_MODEL"), 
         api_version=os.environ.get("AZURE_OPENAI_API_VERSION"),
         api_key=os.environ.get("AZURE_OPENAI_API_KEY"),
         temperature=0,
@@ -36,7 +40,7 @@ def create_agent_team():
         timeout=120,
     )
 
-    # Create the Business Central API agent with the tool (imported at module level)
+    # === Agent Definition ===
     bc_api_assistant = AssistantAgent(
         name="BC_API_Assistant",
         description="Business Central API agent responsible for constructing and executing API calls and answering user questions.",
@@ -50,9 +54,11 @@ def create_agent_team():
                        "End your final answer with 'TASK_COMPLETE' on a new line when the task is complete.",
     )
 
-    # Define termination conditions for the team
+    # === Team Setup ===
+    
+    # Define termination conditions
     max_message_termination = MaxMessageTermination(10)
-    text_termination = TextMentionTermination("TASK_COMPLETE")
+    text_termination = TextMentionTermination("TASK_COMPLETE") 
     termination = max_message_termination | text_termination
 
     # Create a single-agent team (RoundRobinGroupChat with one agent)
@@ -63,7 +69,6 @@ def create_agent_team():
     )
 
     return model_client, bc_api_assistant, group_chat
-
 
 async def run_chat(group_chat, prompt: str) -> List[BaseChatMessage]:
     """
@@ -88,34 +93,30 @@ async def run_chat(group_chat, prompt: str) -> List[BaseChatMessage]:
     print(f"--- run_chat finished. Collected {len(all_messages)} messages. ---")
     return all_messages
 
-
 async def main():
     """Main function for running as a standalone script"""
     # Create agent and team components
-    model_client, _, group_chat = create_agent_team() # Unpack needed components
+    model_client, _, group_chat = create_agent_team()
 
     try:
-        # Define the user's task for standalone execution
         user_message = "Which customers owes money to the company?"
-        # user_message = "Get total sales for customer 10000" # Another example
 
-        # Start the conversation using the team and stream the output to Console
-        print(f"\n--- Running Demo 3 (Tool Use) standalone for: '{user_message}' ---")
+        print(f"\n--- Running Demo 3 (Agent + Tool) standalone for: '{user_message}' ---")
         stream = group_chat.run_stream(task=user_message)
-        await Console(stream, output_stats=True) # output_stats can be helpful
+        await Console(stream, output_stats=True)
 
     finally:
         # Ensure model client is closed
-        print("\n--- Closing model client ---")
-        await model_client.close()
+        print("\n--- Closing model client --- ")
+        if model_client: # Check if model_client was successfully created
+            await model_client.close()
 
 if __name__ == "__main__":
-    # Updated error handling for standalone run
     try:
         asyncio.run(main())
     except Exception as e:
-         # Catch any exception during standalone execution, including potential import errors
          print(f"An error occurred during standalone execution: {e}")
-         # If the dummy tool was created due to import failure, the NotImplementedError will be caught here.
+         import traceback
+         traceback.print_exc()
          if isinstance(e, NotImplementedError) and "bc_api_tool could not be imported" in str(e):
-             print("Please ensure bc_api_tool.py is in the same directory as main.py.")
+             print("Please ensure bc_api_tool.py is in the same directory and this script is run as part of a package (e.g., via the Streamlit app).")
