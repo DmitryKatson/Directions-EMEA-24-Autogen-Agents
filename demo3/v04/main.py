@@ -11,22 +11,7 @@ from autogen_agentchat.ui import Console
 from typing import List, Tuple, Callable, Any
 from autogen_agentchat.messages import BaseChatMessage
 
-# --- Import bc_api_tool --- 
-# Try relative import first (for package context like Streamlit)
-# Fallback to direct import (for running script standalone)
-try:
-    from .bc_api_tool import call_business_central_api
-except ImportError:
-    print("Relative import failed. Trying direct import for bc_api_tool...")
-    try:
-        import bc_api_tool
-        call_business_central_api = bc_api_tool.call_business_central_api
-        print("Direct import successful.")
-    except ImportError as e:
-        print(f"Direct import failed: {e}")
-        # Define a dummy function if all imports fail
-        def call_business_central_api(*args, **kwargs):
-            raise NotImplementedError(f"bc_api_tool could not be imported via relative or direct path. Error: {e}")
+from bc_api_tool import call_business_central_api
 
 # Load environment variables
 dotenv.load_dotenv()
