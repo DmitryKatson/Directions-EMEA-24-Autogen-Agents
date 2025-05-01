@@ -1,2 +1,20 @@
+# Core requirements
 autogen-agentchat
 autogen-ext[openai]
+streamlit
+
+# Demo 4 RAG requirements
+python-dotenv
+PyPDF2
+qdrant-client
+langchain-openai
+openai
+tenacity
+langchain-community
+langchain_qdrant
+tqdm
+
+# Additional utilities
+IPython
+markdownify
+flaml[automl]

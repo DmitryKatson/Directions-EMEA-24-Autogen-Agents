@@ -7,13 +7,25 @@ import re
 import ast
 import traceback
 
-# --- Import Demo Functions Directly ---
-# Ensure the root directory is in the Python path when running streamlit run streamlit/app.py
-# This might require running from the workspace root or setting PYTHONPATH
+# --- Set Page Config (Must be the FIRST Streamlit command) ---
+st.set_page_config(page_title="AutoGen BC API Demos", page_icon="🤖", layout="wide")
+
+# --- Path Setup for Imports ---
+# Add workspace root to path
 workspace_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if workspace_root not in sys.path:
     sys.path.insert(0, workspace_root)
 
+# Explicitly add demo subdirectories to path to help resolve relative imports within them
+demo3_v04_path = os.path.join(workspace_root, "demo3", "v04")
+if demo3_v04_path not in sys.path:
+    sys.path.insert(0, demo3_v04_path)
+    
+demo4_v04_path = os.path.join(workspace_root, "demo4", "v04")
+if demo4_v04_path not in sys.path:
+    sys.path.insert(0, demo4_v04_path)
+
+# --- Import Demo Functions Directly ---
 try:
     from demo1.v04.main import create_agent_team as create_demo1_team, run_chat as run_demo1_chat
 except ImportError as e:
@@ -27,11 +39,18 @@ except ImportError as e:
     create_demo2_team, run_demo2_chat = None, None
 
 try:
-    # Demo 3 specific import handling might still be needed if bc_api_tool causes issues
+    # Now that demo3/v04 is in the path, the relative import inside main.py should work
     from demo3.v04.main import create_agent_team as create_demo3_team, run_chat as run_demo3_chat
 except ImportError as e:
-    st.error(f"Failed to import Demo 3: {e}. Ensure demo3/v04/main.py and bc_api_tool.py exist and are importable.")
+    st.error(f"Failed to import Demo 3: {e}. Ensure demo3/v04/main.py and demo3/v04/bc_api_tool.py exist and are importable.")
     create_demo3_team, run_demo3_chat = None, None
+
+try:
+    # Now that demo4/v04 is in the path, the relative import inside main.py should work
+    from demo4.v04.main import create_agent_team as create_demo4_team, run_chat as run_demo4_chat
+except ImportError as e:
+    st.error(f"Failed to import Demo 4: {e}. Ensure demo4/v04/main.py and demo4/v04/bc_api_tool.py exist and are importable.")
+    create_demo4_team, run_demo4_chat = None, None
 
 # --- Configuration (Paths are no longer needed) ---
 DEMO_CONFIG = {
@@ -55,6 +74,13 @@ DEMO_CONFIG = {
         "caption": "Using AssistantAgent with a custom Tool (1 Agent)",
         "create_func": create_demo3_team,
         "run_func": run_demo3_chat
+    },
+    "demo4": {
+        "name": "Demo 4: Agent + RAG + Tool",
+        "prompts": ["Which customers owes money to the company?"],
+        "caption": "Using AssistantAgent with RAG and API Tool (1 Agent)",
+        "create_func": create_demo4_team,
+        "run_func": run_demo4_chat
     }
 }
 DEFAULT_DEMO = "demo1"
@@ -71,7 +97,7 @@ def get_demo_functions(demo_id):
     if not config:
         st.error(f"Invalid demo ID: {demo_id}")
         return None, None
-    
+
     create_func = config.get('create_func')
     run_func = config.get('run_func')
     
@@ -123,10 +149,124 @@ def reset_chat_state():
     if "agent_components" in st.session_state:
         del st.session_state["agent_components"]
 
-# --- Main Streamlit App ---
-def main():
-    st.set_page_config(page_title="AutoGen BC API Demos", page_icon="🤖", layout="wide")
+# Function to show the embedding UI for Demo 4
+def show_embedding_ui():
+    """Shows the embedding UI for Demo 4 to index documents."""
+    st.header("Document Embedding for RAG")
+    
+    st.markdown("""
+    ### What is RAG (Retrieval Augmented Generation)?
+    RAG enhances AI responses by combining a language model with a knowledge base. When you ask a question:
+    1. The system searches for relevant information in the indexed documents
+    2. It combines this retrieved information with its general knowledge
+    3. It generates a more accurate, contextual response
+    
+    ### How to use this feature:
+    1. Upload a PDF document (like an API manual or business documentation)
+    2. Click "Index Document" to process and embed the content
+    3. Once indexed, you can ask specific questions about the document content
+    """)
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        # File uploader for PDF documents
+        uploaded_file = st.file_uploader("Upload a PDF document for indexing", type="pdf")
+        
+        default_pdf_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                        "demo4", "embedding", "Business_Central_API_v2.0_Reference_2nd_Edition.pdf")
+        
+        use_default_doc = st.checkbox("Use default Business Central API documentation",
+                                     value=os.path.exists(default_pdf_path))
+        
+        if use_default_doc:
+            st.info("Using the default Business Central API v2.0 Reference documentation")
+            file_to_index = default_pdf_path
+            can_index = True
+        elif uploaded_file is not None:
+            # Save the uploaded file temporarily
+            temp_file_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                         "demo4", "embedding", uploaded_file.name)
+            with open(temp_file_path, "wb") as f:
+                f.write(uploaded_file.getbuffer())
+            
+            st.success(f"File saved: {uploaded_file.name}")
+            file_to_index = temp_file_path
+            can_index = True
+        else:
+            can_index = False
+    
+    with col2:
+        st.markdown("#### Environment Check")
+        # Check environment variables required for embedding
+        env_vars = {
+            "QDRANT_URL": os.environ.get("QDRANT_URL", ""),
+            "QDRANT_API_KEY": os.environ.get("QDRANT_API_KEY", ""),
+            "QDRANT_COLLECTION": os.environ.get("QDRANT_COLLECTION", ""),
+            "AZURE_OPENAI_EMBEDDING_MODEL": os.environ.get("AZURE_OPENAI_EMBEDDING_MODEL", "")
+        }
+        
+        all_vars_set = all(env_vars.values())
+        
+        env_status = {}
+        for var, value in env_vars.items():
+            env_status[var] = "✅ Set" if value else "❌ Missing"
+        
+        st.json(env_status)
+        
+        if not all_vars_set:
+            st.warning("Some required environment variables are missing. Please check your .env file.")
+    
+    # Button to start the embedding process
+    if can_index:
+        if st.button("Index Document"):
+            with st.spinner("Indexing document... This may take a while."):
+                try:
+                    # Import the embedding module dynamically
+                    # Ensure the embedding directory itself is in the path
+                    embedding_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "demo4", "embedding")
+                    if embedding_dir not in sys.path:
+                        sys.path.insert(0, embedding_dir) # Add to front to prioritize
+                    
+                    # Now import the function
+                    from embedding import process_and_embed_pdf
+                    
+                    # Process and embed the PDF
+                    with st.expander("Indexing Progress", expanded=True):
+                        log_output = st.empty()
+                        old_stdout = sys.stdout
+                        from io import StringIO
+                        captured_output = StringIO()
+                        try:
+                            sys.stdout = captured_output
+                            process_and_embed_pdf(file_to_index)
+                            sys.stdout = old_stdout
+                            log_output.markdown(f"```\n{captured_output.getvalue()}\n```")
+                        except Exception as e:
+                            sys.stdout = old_stdout
+                            log_output.markdown(f"```\nError: {str(e)}\n{captured_output.getvalue()}\n```")
+                            raise e
+                    
+                    st.success("Document indexed successfully! You can now query the RAG system.")
+                    st.markdown("""
+                    ### Try these example queries:
+                    - "How do I filter items by base unit of measure?"
+                    - "What is OData and how is it used in Business Central API?"
+                    - "How can I authenticate to the Business Central API?"
+                    """)
+                except ImportError as ie:
+                    st.error(f"Import Error during embedding: {ie}. Check if 'embedding.py' exists in demo4/embedding.")
+                    st.error(traceback.format_exc())
+                except Exception as e:
+                    st.error(f"Error during indexing: {e}")
+                    st.error(traceback.format_exc())
+    else:
+        st.info("Please upload a document or use the default documentation to begin indexing.")
 
+# --- Main Streamlit App --- 
+def main():
+    # This function is now called after st.set_page_config()
+    
     # --- Sidebar for Demo Selection ---
     st.sidebar.title("Demo Selection")
     demo_options = {demo_id: config["name"] for demo_id, config in DEMO_CONFIG.items()}
@@ -158,6 +298,11 @@ def main():
     current_config = DEMO_CONFIG[st.session_state.selected_demo]
     st.title(current_config["name"])
     st.caption(current_config["caption"])
+
+    # --- Show Embedding UI for Demo 4 ---
+    if st.session_state.selected_demo == "demo4":
+        with st.expander("Document Embedding (RAG)", expanded=False):
+            show_embedding_ui()
 
     # --- Get Demo Functions (using direct imports) ---
     create_agent_team_func, run_chat_func = get_demo_functions(st.session_state.selected_demo)
