@@ -63,7 +63,7 @@ DEMO_CONFIG = {
     },
     "demo2": {
         "name": "Demo 2 (Team of Agents): Manager + Coder + Executor + Composer",
-        "prompts": ["List me all unpaid sales invoices for the last year"],
+        "prompts": ["List me all unpaid invoices since the beginning of the year"],
         "caption": "Using SelectorGroupChat (3 Agents, LLM selects next)",
         "create_func": create_demo2_team,
         "run_func": run_demo2_chat
@@ -84,6 +84,14 @@ DEMO_CONFIG = {
     }
 }
 DEFAULT_DEMO = "demo1"
+
+# --- Constants for Final Answer Agent Names ---
+FINAL_ANSWER_AGENTS = {
+    "demo1": "bc_api_agent",
+    "demo2": "Answer_Composer_Agent",
+    "demo3": "BC_API_Assistant",
+    "demo4": "BC_API_Assistant",
+}
 
 # --- Utility Functions (load_demo_module removed) ---
 
@@ -107,39 +115,117 @@ def get_demo_functions(demo_id):
         
     return create_func, run_func
 
-# display_message and reset_chat_state remain the same
-def display_message(message):
-    """Displays messages, attempting to format Python literals or JSON within text."""
-    role = message.get("role", "unknown")
-    content = message.get("content", "")
-    with st.chat_message(role):
-        if "```" in content:
-            st.markdown(content, unsafe_allow_html=True)
-            return
-        if role == "user":
-             st.markdown(content)
-             return
-        match = re.search(r'(.*?)(\[.*?\]|\{.*?\})', content, re.DOTALL)
-        if match:
-            prefix = match.group(1).strip()
-            literal_str = match.group(2)
-            parsed_data = None
-            try:
-                parsed_data = ast.literal_eval(literal_str)
-            except:
-                try:
-                    json_str = literal_str.replace("'", '"')
-                    json_str = re.sub(r'\bNone\b', 'null', json_str)
-                    json_str = re.sub(r'\bTrue\b', 'true', json_str)
-                    json_str = re.sub(r'\bFalse\b', 'false', json_str)
-                    parsed_data = json.loads(json_str)
-                except:
-                    parsed_data = None
-            if parsed_data is not None:
-                if prefix: st.markdown(prefix)
-                st.json(parsed_data)
+def display_message(message_or_log):
+    """Displays messages (simple format) or detailed log entries (new format)."""
+    
+    # Check if it's the simple message format
+    if "role" in message_or_log and "content" in message_or_log:
+        # --- Original logic for simple messages --- 
+        role = message_or_log.get("role", "unknown")
+        content = message_or_log.get("content", "")
+        icon = "🧑" if role == "user" else "🤖"
+        with st.chat_message(role, avatar=icon):
+            if "```" in content:
+                st.markdown(content, unsafe_allow_html=True)
                 return
-        st.markdown(content)
+            # Removed the complex literal/JSON parsing for simplicity, 
+            # similar to how it was handled in the new log logic for TextMessage
+            st.markdown(content)
+        return # Handled simple message
+        # --- End of original logic ---
+        
+    # Otherwise, assume it's the detailed log entry format
+    log_entry = message_or_log
+    log_type = log_entry.get("type", "unknown")
+    log_data = log_entry.get("data", {})
+
+    role = "system" # Default role for logs
+    icon = "⚙️" # Default icon for logs
+
+    # --- New logic for detailed logs --- 
+    if log_type == "user_prompt":
+        role = "user"
+        icon = "🧑"
+        with st.chat_message(role, avatar=icon):
+            st.markdown(f"**Log: User Prompt**")
+            st.markdown(log_entry.get("content", "[No content]"))
+
+    elif log_type == "TextMessage":
+        role = log_data.get("source", "assistant")
+        icon = "🤖" if role != "user" else "🧑" # Keep consistent icons
+        content = log_data.get("content", "")
+        with st.chat_message(role, avatar=icon):
+            st.markdown(f"**Log: Agent Message ({role})**")
+            if "```" in content:
+                 st.markdown(content, unsafe_allow_html=True)
+            else:
+                 st.markdown(content)
+
+    elif log_type == "ToolCallRequestMessage":
+        source_agent = log_data.get("source", "tool_request")
+        role = source_agent # Use agent name as role
+        icon = "🛠️"
+        with st.chat_message(role, avatar=icon):
+            st.markdown(f"**Log: Tool Call Request ({role})**")
+            tool_calls = log_data.get("tool_calls", [])
+            if not tool_calls: st.markdown("_(No tool calls found in data)_")
+            for tc in tool_calls:
+                st.markdown(f"* **Tool:** `{tc.get('name', 'unknown_tool')}` (ID: `{tc.get('id')}`)")
+                try:
+                    # Attempt to parse arguments if they are a JSON string
+                    args_dict = json.loads(tc.get('arguments', '{}')) 
+                    st.code(json.dumps(args_dict, indent=2), language='json')
+                except (json.JSONDecodeError, TypeError):
+                     # Otherwise, display raw arguments
+                    st.text(f"Arguments: {tc.get('arguments', {})}")
+        
+    elif log_type == "ToolCallResultMessage":
+        role = "tool_result" # Use a specific role for results
+        tool_results = log_data.get("tool_call_results", [])
+        if not tool_results: 
+             with st.chat_message(role, avatar="ℹ️"):
+                  st.markdown("_(No tool results found in data)_")
+                  return
+
+        for result in tool_results:
+             is_error = result.get("is_error", False)
+             tool_name = result.get("name", "unknown_tool")
+             call_id = result.get("call_id")
+             content = result.get("content", "")
+             icon = "❌" if is_error else "✅" # Error or Success icon
+             
+             with st.chat_message(role, avatar=icon):
+                 if is_error:
+                     st.error(f"**Log: Tool Error ({tool_name} - ID: {call_id})**")
+                     try:
+                         error_data = json.loads(content)
+                         st.json(error_data)
+                     except (json.JSONDecodeError, TypeError):
+                         st.code(content, language='text')
+                 else:
+                      st.success(f"**Log: Tool Result ({tool_name} - ID: {call_id})**")
+                      try:
+                         content_data = json.loads(content)
+                         st.json(content_data)
+                      except (json.JSONDecodeError, TypeError):
+                          if isinstance(content, str) and len(content) > 500:
+                              st.text_area("Result Content:", value=content, height=200)
+                          elif isinstance(content, str):
+                              st.markdown(f"```\n{content}\n```")
+                          else:
+                              st.text(f"Result: {content}") # Fallback for non-string content
+        
+    else:
+        # Fallback for other known or unknown log event types
+        role = log_type # Use the type name as role
+        icon = "⚙️"
+        with st.chat_message(role, avatar=icon):
+            st.markdown(f"**Log: Event Type:** `{log_type}`")
+            try:
+                st.json(log_data) 
+            except Exception:
+                 st.text(f"Data: {log_data}") # Fallback if data isn't JSON serializable
+    # --- End of new logic ---
 
 def reset_chat_state():
     """Clears messages and agent components from session state."""
@@ -340,29 +426,43 @@ def main():
             st.session_state.messages[-1]["role"] == "user" and
             "internal_messages" not in st.session_state):
         user_prompt = st.session_state.messages[-1]["content"]
+        selected_demo_id = st.session_state.get("selected_demo", DEFAULT_DEMO)
+
         if "agent_components" not in st.session_state or "group_chat" not in st.session_state.agent_components:
             st.warning("Agent components not initialized. Please refresh or select a demo.")
             st.stop()
         group_chat = st.session_state.agent_components["group_chat"]
         with st.spinner(f"Processing..."):
             try:
-                response_messages = asyncio.run(run_chat_func(group_chat, user_prompt))
-                internal_messages_processed = []
-                final_answer_content = "No response generated."
-                for i, msg in enumerate(response_messages):
-                    role = "system"; content = "Error getting content"
-                    try:
-                        if hasattr(msg.source, 'name') and isinstance(msg.source.name, str): role = msg.source.name
-                        elif isinstance(msg.source, str): role = msg.source
-                    except AttributeError: role = "unknown_source"
-                    try: content = msg.to_text() if hasattr(msg, 'to_text') else str(msg)
-                    except Exception as content_e: content = f"Error getting content for message {i}: {content_e}"
-                    internal_messages_processed.append({"role": role, "content": content})
-                    final_answer_agents = ["bc_api_agent", "executor_agent", "Answer_Composer_Agent", "BC_API_Assistant"]
-                    if role in final_answer_agents:
-                        final_answer_content = content
+                # Get the detailed logs from the run_chat function
+                run_chat_func = get_demo_functions(selected_demo_id)[1] # Get the specific run_chat func
+                if not run_chat_func:
+                     st.error(f"Could not find run_chat function for demo {selected_demo_id}")
+                     st.stop()
+                     
+                detailed_logs = asyncio.run(run_chat_func(group_chat, user_prompt))
+
+                # Extract the final assistant message for main display - using dynamic agent name
+                final_answer_content = "No final answer found in logs."
+                expected_final_agent = FINAL_ANSWER_AGENTS.get(selected_demo_id, "assistant") # Fallback
+                
+                for log in reversed(detailed_logs):
+                    log_type = log.get("type")
+                    log_data = log.get("data", {})
+                    source_agent = log_data.get("source")
+                    
+                    if log_type == "TextMessage" and source_agent == expected_final_agent:
+                        final_answer_content = log_data.get("content", final_answer_content)
+                        # Optional: Remove termination signal if present for cleaner display
+                        if final_answer_content.strip().endswith(("TERMINATE", "TASK_COMPLETE")): 
+                             final_answer_content = re.sub(r'\s*(TERMINATE|TASK_COMPLETE)\s*$','', final_answer_content).strip()
+                        break # Found the last relevant message
+                
                 st.session_state.messages.append({"role": "assistant", "content": final_answer_content})
-                st.session_state["internal_messages"] = internal_messages_processed
+                
+                # Store the raw detailed logs for the expander
+                st.session_state["internal_messages"] = detailed_logs 
+                
                 st.rerun()
             except Exception as e:
                 st.error(f"An error occurred during processing: {e}")

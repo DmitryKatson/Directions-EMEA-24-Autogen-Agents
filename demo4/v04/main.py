@@ -5,13 +5,14 @@ import dotenv
 from pathlib import Path
 from typing import List, Dict, Any, Tuple
 from functools import partial
+import json # For formatting arguments/results nicely
 
 # Core AgentChat components
 from autogen_agentchat.agents import AssistantAgent
 from autogen_agentchat.teams import RoundRobinGroupChat
 from autogen_agentchat.conditions import MaxMessageTermination, TextMentionTermination
 from autogen_agentchat.ui import Console
-from autogen_agentchat.messages import BaseChatMessage
+from autogen_agentchat.messages import BaseChatMessage, TextMessage
 
 # Model and Qdrant components
 from autogen_ext.models.openai import AzureOpenAIChatCompletionClient
@@ -136,28 +137,72 @@ def create_agent_team():
     # Return the necessary components
     return model_client, bc_api_assistant, group_chat
 
-async def run_chat(group_chat, prompt: str) -> List[BaseChatMessage]:
+async def run_chat(group_chat, prompt: str) -> List[Dict[str, Any]]:
     """
-    Run the agent team chat for a given prompt and collect all messages.
+    Run the agent team chat for a given prompt and collect detailed event logs.
 
     Args:
         group_chat: The RoundRobinGroupChat instance to use
         prompt: The user prompt to process
 
     Returns:
-        List of BaseChatMessage objects from the conversation
+        List of dictionaries, where each dictionary represents a detailed event log.
     """
-    print(f"--- Starting run_chat for prompt: '{prompt}' ---")
-    all_messages: List[BaseChatMessage] = []
+    print(f"--- Starting run_chat for prompt: \'{prompt}\' ---")
+    detailed_logs: List[Dict[str, Any]] = []
+
+    # Append the initial user prompt
+    detailed_logs.append({"type": "user_prompt", "content": prompt})
 
     stream = group_chat.run_stream(task=prompt)
 
-    async for message in stream:
-        if isinstance(message, BaseChatMessage):
-            all_messages.append(message)
+    async for event_data in stream:
+        event_type_name = type(event_data).__name__
+        log_entry = {"type": event_type_name, "data": None}
+        source_name = getattr(getattr(event_data, 'source', None), 'name', str(getattr(event_data, 'source', 'unknown')))
 
-    print(f"--- run_chat finished. Collected {len(all_messages)} messages. ---")
-    return all_messages
+        if event_type_name == "TextMessage" or isinstance(event_data, TextMessage):
+            log_entry["data"] = {
+                "source": source_name,
+                "content": event_data.to_text()
+            }
+        elif event_type_name == "ToolCallRequestMessage":
+             # Assume structure based on type name
+             log_entry["data"] = {
+                 "source": source_name,
+                 "tool_calls": [
+                     {"id": getattr(tc, 'id', None), 
+                      "name": getattr(tc, 'name', None), 
+                      "arguments": getattr(tc, 'arguments', None)}
+                     for tc in getattr(event_data, 'tool_calls', [])
+                 ]
+             }
+        elif event_type_name == "ToolCallResultMessage":
+             # Assume structure based on type name
+             log_entry["data"] = {
+                 "source": source_name,
+                 "tool_call_results": [
+                     {"call_id": getattr(res, 'call_id', None), 
+                      "name": getattr(res, 'name', None), 
+                      "content": getattr(res, 'content', None), 
+                      "is_error": getattr(res, 'is_error', False)}
+                     for res in getattr(event_data, 'tool_call_results', [])
+                 ]
+             }
+        else:
+            # Catch-all for other types, try to represent them
+            try:
+                log_entry["data"] = event_data.model_dump() # If pydantic model
+            except AttributeError:
+                try:
+                   log_entry["data"] = vars(event_data) # If standard object
+                except TypeError:
+                   log_entry["data"] = repr(event_data) # Fallback
+
+        detailed_logs.append(log_entry)
+
+    print(f"--- run_chat finished. Collected {len(detailed_logs)} detailed logs. ---")
+    return detailed_logs
 
 async def main():
     """Main function for running as a standalone script"""

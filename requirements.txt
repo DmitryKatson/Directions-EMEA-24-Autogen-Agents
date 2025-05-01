@@ -18,3 +18,4 @@ tqdm
 IPython
 markdownify
 flaml[automl]
+nest-asyncio
