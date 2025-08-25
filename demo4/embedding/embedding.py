@@ -16,7 +16,16 @@ def load_ascii_art(file_path):
         return file.read()
 
 # Load .env file from the current directory or parent directories
-dotenv.load_dotenv()
+# Try to load from streamlit directory first, then from root
+streamlit_env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), 'streamlit', '.env')
+root_env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), '.env')
+
+if os.path.exists(streamlit_env_path):
+    dotenv.load_dotenv(streamlit_env_path)
+elif os.path.exists(root_env_path):
+    dotenv.load_dotenv(root_env_path)
+else:
+    dotenv.load_dotenv()  # Fallback to default behavior
 script_dir = os.path.dirname(os.path.abspath(__file__)) # Keep for later use
 
 def initialize_qdrant():

@@ -57,14 +57,14 @@ except ImportError as e:
 DEMO_CONFIG = {
     "demo1": {
         "name": "Demo 1 (Simple Agent): Code + Executor",
-        "prompts": ["List me the Cash CoA"],
+        "prompts": ["Show me cash accounts"],
         "caption": "Using AssistantAgent + CodeExecutorAgent (2 Agents)",
         "create_func": create_demo1_team,
         "run_func": run_demo1_chat
     },
     "demo2": {
         "name": "Demo 2 (Team of Agents): Manager + Coder + Executor + Composer",
-        "prompts": ["List me all unpaid invoices since the beginning of the year"],
+        "prompts": ["List me all unpaid invoices since the beginning of the year", "Show me cash accounts"],
         "caption": "Using SelectorGroupChat (3 Agents, LLM selects next)",
         "create_func": create_demo2_team,
         "run_func": run_demo2_chat

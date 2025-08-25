@@ -56,8 +56,8 @@ def main():
         max_consecutive_auto_reply=max_turns,
     )
 
-    # Demo 1: List me the Cash CoA
-    message = "List me the Cash CoA"
+    # Demo 1: Show me cash accounts
+    message = "Show me cash accounts"
 
     # Demo 2: List me the Profit & Loss CoA
     # message = "List me the Profit & Loss CoA"

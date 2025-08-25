@@ -12,7 +12,16 @@ from autogen_ext.models.openai import AzureOpenAIChatCompletionClient
 from autogen_agentchat.messages import BaseAgentEvent, BaseChatMessage, TextMessage
 
 # Load environment variables
-dotenv.load_dotenv()
+# Try to load from streamlit directory first, then from root
+streamlit_env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'streamlit', '.env')
+root_env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), '.env')
+
+if os.path.exists(streamlit_env_path):
+    dotenv.load_dotenv(streamlit_env_path)
+elif os.path.exists(root_env_path):
+    dotenv.load_dotenv(root_env_path)
+else:
+    dotenv.load_dotenv()  # Fallback to default behavior
 
 # Define the custom selector prompt
 SELECTOR_PROMPT = """You are the conductor managing a team of AI agents.

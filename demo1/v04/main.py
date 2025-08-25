@@ -13,7 +13,16 @@ from autogen_ext.models.openai import AzureOpenAIChatCompletionClient
 from autogen_core import CancellationToken
 
 # Load environment variables when the module is imported
-dotenv.load_dotenv()
+# Try to load from streamlit directory first, then from root
+streamlit_env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'streamlit', '.env')
+root_env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), '.env')
+
+if os.path.exists(streamlit_env_path):
+    dotenv.load_dotenv(streamlit_env_path)
+elif os.path.exists(root_env_path):
+    dotenv.load_dotenv(root_env_path)
+else:
+    dotenv.load_dotenv()  # Fallback to default behavior
 
 def create_agent_team():
     """
@@ -136,8 +145,8 @@ async def main():
     model_client, bc_api_agent, executor_agent, group_chat = create_agent_team()
 
     try:
-        # Demo 1: List me the Cash CoA
-        message = "List me the Cash CoA"
+        # Demo 1: Show me cash accounts
+        message = "Show me cash accounts"
 
         # Demo 2: List me the Profit & Loss CoA
         # message = "List me the Profit & Loss CoA"

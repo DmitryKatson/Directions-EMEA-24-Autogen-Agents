@@ -1,5 +1,5 @@
 # Core requirements
-autogen-agentchat
+autogen_agentchat
 autogen-ext[openai]
 streamlit
 
