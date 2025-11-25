@@ -165,10 +165,54 @@ def display_message(message_or_log):
         content = log_data.get("content", "")
         with st.chat_message(role, avatar=icon):
             st.markdown(f"**Log: Agent Message ({role})**")
-            if "```" in content:
-                 st.markdown(content, unsafe_allow_html=True)
+            
+            # Define threshold for long messages (500 characters)
+            MESSAGE_LENGTH_THRESHOLD = 500
+            
+            # Check if message is long
+            is_long_message = len(content) > MESSAGE_LENGTH_THRESHOLD
+            
+            if is_long_message:
+                # Create a unique key for this message based on content hash
+                import hashlib
+                message_key = f"show_full_{hashlib.md5(content.encode()).hexdigest()[:8]}"
+                
+                # Initialize session state for this message if not exists
+                if message_key not in st.session_state:
+                    st.session_state[message_key] = False
+                
+                # Show truncated version
+                truncated_content = content[:MESSAGE_LENGTH_THRESHOLD] + "..."
+                if "```" in truncated_content:
+                    st.markdown(truncated_content, unsafe_allow_html=True)
+                else:
+                    st.markdown(truncated_content)
+                
+                # Button to toggle full message view with proper state sync
+                # Read current state first
+                current_state = st.session_state[message_key]
+                button_label = "Hide full message" if current_state else "Show full message"
+                
+                # Use on_click callback to ensure state updates before rerun
+                def toggle_message():
+                    st.session_state[message_key] = not st.session_state[message_key]
+                
+                st.button(button_label, key=f"btn_{message_key}", use_container_width=False, on_click=toggle_message)
+                
+                # Show full message if toggled
+                if st.session_state[message_key]:
+                    st.markdown("---")
+                    if "```" in content:
+                        st.markdown(content, unsafe_allow_html=True)
+                    else:
+                        # Use text_area for better readability of long text (non-code)
+                        st.text_area("Full message:", value=content, height=300, disabled=True, key=f"full_{message_key}", label_visibility="collapsed")
             else:
-                 st.markdown(content)
+                # Show full content for short messages
+                if "```" in content:
+                     st.markdown(content, unsafe_allow_html=True)
+                else:
+                     st.markdown(content)
 
     elif log_type == "ToolCallRequestMessage":
         source_agent = log_data.get("source", "tool_request")
@@ -230,10 +274,69 @@ def display_message(message_or_log):
         icon = "⚙️"
         with st.chat_message(role, avatar=icon):
             st.markdown(f"**Log: Event Type:** `{log_type}`")
-            try:
-                st.json(log_data) 
-            except Exception:
-                 st.text(f"Data: {log_data}") # Fallback if data isn't JSON serializable
+            
+            # Extract content property if it exists
+            content_value = log_data.get("content", None)
+            other_properties = {k: v for k, v in log_data.items() if k != "content"}
+            
+            # Display content property prominently (always shown)
+            if content_value is not None:
+                st.markdown("**Content:**")
+                try:
+                    # Try to display as JSON if it's a dict/list
+                    if isinstance(content_value, (dict, list)):
+                        st.json(content_value)
+                    else:
+                        # If it's a string, try to parse as JSON first
+                        try:
+                            parsed = json.loads(content_value) if isinstance(content_value, str) else content_value
+                            st.json(parsed)
+                        except (json.JSONDecodeError, TypeError):
+                            # Display as text if not JSON
+                            if isinstance(content_value, str) and len(content_value) > 500:
+                                import hashlib
+                                content_key = f"content_{log_type}_{hashlib.md5(str(content_value).encode()).hexdigest()[:8]}"
+                                st.text_area("Content:", value=content_value, height=200, disabled=True, key=content_key, label_visibility="collapsed")
+                            else:
+                                st.code(str(content_value), language='text')
+                except Exception:
+                    st.text(f"Content: {content_value}")
+            
+            # Display other properties with button to show/hide (hidden by default)
+            if other_properties:
+                import hashlib
+                other_props_key = f"show_other_props_{log_type}_{hashlib.md5(str(log_data).encode()).hexdigest()[:8]}"
+                
+                # Initialize session state if not exists (default to False = hidden)
+                if other_props_key not in st.session_state:
+                    st.session_state[other_props_key] = False
+                
+                # Button to toggle other properties visibility
+                current_state = st.session_state[other_props_key]
+                button_label = "Hide other properties" if current_state else "Show other properties"
+                
+                def make_toggle(key):
+                    def toggle():
+                        st.session_state[key] = not st.session_state[key]
+                    return toggle
+                
+                st.button(button_label, key=f"btn_{other_props_key}", use_container_width=False, on_click=make_toggle(other_props_key))
+                
+                # Show other properties if toggled
+                if st.session_state[other_props_key]:
+                    st.markdown("**Other Properties:**")
+                    try:
+                        st.json(other_properties)
+                    except Exception:
+                        for prop_key, prop_value in other_properties.items():
+                            st.text(f"**{prop_key}:** {prop_value}")
+            
+            # If no content property and no other properties, show all data
+            if content_value is None and not other_properties:
+                try:
+                    st.json(log_data) 
+                except Exception:
+                     st.text(f"Data: {log_data}") # Fallback if data isn't JSON serializable
     # --- End of new logic ---
 
 def reset_chat_state():

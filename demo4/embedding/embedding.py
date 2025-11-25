@@ -33,7 +33,8 @@ def initialize_qdrant():
     qdrant_url = os.getenv('QDRANT_URL')
     qdrant_key = os.getenv('QDRANT_API_KEY')
     qdrant_collection = os.getenv('QDRANT_COLLECTION')    
-    client = QdrantClient(url=qdrant_url, api_key=qdrant_key, prefer_grpc=True, timeout=30)
+    # Use HTTP instead of gRPC to avoid 404 errors with some Qdrant cloud instances
+    client = QdrantClient(url=qdrant_url, api_key=qdrant_key, prefer_grpc=False, timeout=30, check_compatibility=False)
     
     try:
         collections = client.get_collections()
@@ -52,12 +53,20 @@ def initialize_qdrant():
 
         # Ensure the payload index exists for metadata.source
         print(f"Ensuring payload index exists for 'metadata.source' in collection '{qdrant_collection}'...")
-        client.create_payload_index(
-            collection_name=qdrant_collection,
-            field_name="metadata.source",
-            field_schema=models.PayloadSchemaType.KEYWORD # Use PayloadSchemaType for keyword index
-        )
-        print("Payload index for 'metadata.source' ensured.")
+        try:
+            client.create_payload_index(
+                collection_name=qdrant_collection,
+                field_name="metadata.source",
+                field_schema=models.PayloadSchemaType.KEYWORD # Use PayloadSchemaType for keyword index
+            )
+            print("Payload index for 'metadata.source' ensured.")
+        except Exception as index_error:
+            # Index might already exist, which is fine
+            if "already exists" in str(index_error).lower() or "duplicate" in str(index_error).lower():
+                print("Payload index for 'metadata.source' already exists.")
+            else:
+                # Re-raise if it's a different error
+                raise
             
     except Exception as e:
         print(f"Error while initializing Qdrant or creating index: {e}")
@@ -158,9 +167,25 @@ def process_and_embed_pdf(file_path, progress_callback=None):
         progress_callback(0, num_batches, "Starting document embedding...")
         
     for i, batch in enumerate(document_batches):
-        add_documents_to_qdrant(qdrant, batch)
+        batch_start_time = time.time()
+        batch_size = len(batch)
+        print(f"Processing batch {i+1}/{num_batches} ({batch_size} documents)...")
+        
+        try:
+            add_documents_to_qdrant(qdrant, batch)
+            batch_time = time.time() - batch_start_time
+            print(f"Batch {i+1}/{num_batches} completed in {batch_time:.2f} seconds")
+        except Exception as e:
+            batch_time = time.time() - batch_start_time
+            print(f"Error in batch {i+1}/{num_batches} after {batch_time:.2f} seconds: {e}")
+            raise
+        
         if progress_callback:
             progress_callback(i + 1, num_batches, f"Embedding batch {i+1}/{num_batches}")
+        
+        # Add a small delay between batches to avoid rate limiting (except for the last batch)
+        if i < num_batches - 1:
+            time.sleep(0.5)  # 500ms delay to help avoid rate limits
 
     print("-" * 50)
 

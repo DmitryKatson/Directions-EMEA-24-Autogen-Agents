@@ -73,11 +73,13 @@ def create_agent_team():
 
     # Note: QdrantClient might be better managed if long-lived, but for simplicity 
     # we create it here. Consider passing it in if the app structure evolves.
+    # Use HTTP instead of gRPC to avoid 404 errors with some Qdrant cloud instances
     qdrant_client = QdrantClient(
         url=qdrant_url,
         api_key=qdrant_api_key,
-        prefer_grpc=True, 
-        timeout=30
+        prefer_grpc=False, 
+        timeout=30,
+        check_compatibility=False
     )
 
     # === Qdrant Query Tool Definition ===
