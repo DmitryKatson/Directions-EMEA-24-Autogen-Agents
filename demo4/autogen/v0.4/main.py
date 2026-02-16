@@ -151,13 +151,14 @@ def create_agent_team():
     # Return the necessary components
     return model_client, bc_api_assistant, group_chat
 
-async def run_chat(group_chat, prompt: str) -> List[Dict[str, Any]]:
+async def run_chat(group_chat, prompt: str, on_event=None) -> List[Dict[str, Any]]:
     """
     Run the agent team chat for a given prompt and collect detailed event logs.
 
     Args:
         group_chat: The RoundRobinGroupChat instance to use
         prompt: The user prompt to process
+        on_event: Optional callback function for real-time event streaming
 
     Returns:
         List of dictionaries, where each dictionary represents a detailed event log.
@@ -181,6 +182,10 @@ async def run_chat(group_chat, prompt: str) -> List[Dict[str, Any]]:
         if event_type_name == "TextMessage" or isinstance(event_data, TextMessage):
             # Accumulate streaming tokens into complete messages
             content = event_data.to_text()
+            
+            # Emit streaming token event for real-time display
+            if on_event:
+                on_event({"type": "streaming_token", "source": source_name, "content": content})
             
             # If this is from the same source, accumulate the content
             if current_source == source_name and current_message is not None:
@@ -217,6 +222,21 @@ async def run_chat(group_chat, prompt: str) -> List[Dict[str, Any]]:
                  ]
              }
             detailed_logs.append(log_entry)
+            
+            # Emit tool call events for real-time display
+            if on_event:
+                for tc in getattr(event_data, 'tool_calls', []):
+                    import json
+                    try:
+                        args_dict = json.loads(getattr(tc, 'arguments', '{}'))
+                    except (json.JSONDecodeError, TypeError):
+                        args_dict = {}
+                    on_event({
+                        "type": "tool_call",
+                        "source": source_name,
+                        "tool_name": getattr(tc, 'name', 'unknown'),
+                        "arguments": args_dict
+                    })
         elif event_type_name == "ToolCallResultMessage":
             # For non-text messages, save current accumulated message first
             if current_message is not None:
@@ -236,6 +256,17 @@ async def run_chat(group_chat, prompt: str) -> List[Dict[str, Any]]:
                  ]
              }
             detailed_logs.append(log_entry)
+            
+            # Emit tool result events for real-time display
+            if on_event:
+                for res in getattr(event_data, 'tool_call_results', []):
+                    on_event({
+                        "type": "tool_result",
+                        "source": source_name,
+                        "tool_name": getattr(res, 'name', 'unknown'),
+                        "content": getattr(res, 'content', ''),
+                        "is_error": getattr(res, 'is_error', False)
+                    })
         else:
             # For non-text messages, save current accumulated message first
             if current_message is not None:

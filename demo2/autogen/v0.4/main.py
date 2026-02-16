@@ -117,13 +117,14 @@ def create_agent_team():
     return model_client, bc_api_coder, executor, answer_composer_agent, group_chat
 
 
-async def run_chat(group_chat, prompt: str) -> List[Dict[str, Any]]:
+async def run_chat(group_chat, prompt: str, on_event=None) -> List[Dict[str, Any]]:
     """
     Run the agent team chat for a given prompt and collect detailed event logs.
 
     Args:
         group_chat: The SelectorGroupChat instance to use
         prompt: The user prompt to process
+        on_event: Optional callback function for real-time event streaming
 
     Returns:
         List of dictionaries, where each dictionary represents a detailed event log.
@@ -148,6 +149,10 @@ async def run_chat(group_chat, prompt: str) -> List[Dict[str, Any]]:
         if event_type_name == "TextMessage" or isinstance(event_data, TextMessage):
             # Accumulate streaming tokens into complete messages
             content = event_data.to_text()
+            
+            # Emit streaming token event for real-time display
+            if on_event:
+                on_event({"type": "streaming_token", "source": source_name, "content": content})
             
             # If this is from the same source, accumulate the content
             if current_source == source_name and current_message is not None:
@@ -178,10 +183,14 @@ async def run_chat(group_chat, prompt: str) -> List[Dict[str, Any]]:
             try:
                 # Log AgentSelection events specifically if needed
                 if event_type_name == "AgentSelection" and hasattr(event_data, 'selected_agent'):
+                     selected_agent_name = getattr(getattr(event_data, 'selected_agent', None), 'name', 'unknown')
                      log_entry["data"] = {
                          "source": source_name, # Usually the SelectorGroupChat
-                         "selected_agent": getattr(getattr(event_data, 'selected_agent', None), 'name', 'unknown')
+                         "selected_agent": selected_agent_name
                      }
+                     # Emit agent change event for real-time display
+                     if on_event:
+                         on_event({"type": "agent_change", "agent_name": selected_agent_name})
                 # Log CodeExecution events
                 elif event_type_name.startswith("CodeExecution") and hasattr(event_data, 'execution_result'):
                      log_entry["data"] = {

@@ -84,13 +84,14 @@ def create_agent_team():
     
     return model_client, bc_api_agent, code_executor_agent, group_chat
 
-async def run_chat(group_chat, prompt: str) -> List[Dict[str, Any]]:
+async def run_chat(group_chat, prompt: str, on_event=None) -> List[Dict[str, Any]]:
     """
     Run the agent team chat for a given prompt and collect detailed event logs.
     
     Args:
         group_chat: The RoundRobinGroupChat instance to use
         prompt: The user prompt to process
+        on_event: Optional callback function for real-time event streaming
         
     Returns:
         List of dictionaries, where each dictionary represents a detailed event log.
@@ -115,6 +116,10 @@ async def run_chat(group_chat, prompt: str) -> List[Dict[str, Any]]:
         if event_type_name == "TextMessage" or isinstance(event_data, TextMessage):
             # Accumulate streaming tokens into complete messages
             content = event_data.to_text()
+            
+            # Emit streaming token event for real-time display
+            if on_event:
+                on_event({"type": "streaming_token", "source": source_name, "content": content})
             
             # If this is from the same source, accumulate the content
             if current_source == source_name and current_message is not None:

@@ -175,13 +175,14 @@ def create_agent_team():
     return client, agent
 
 
-async def run_chat(agent, prompt: str) -> List[Dict[str, Any]]:
+async def run_chat(agent, prompt: str, on_event=None) -> List[Dict[str, Any]]:
     """
     Run the agent for a given prompt and collect detailed event logs.
     
     Args:
         agent: The Agent instance to use
         prompt: The user prompt to process
+        on_event: Optional callback function for real-time event streaming
         
     Returns:
         List of dictionaries representing detailed event logs
@@ -213,12 +214,42 @@ async def run_chat(agent, prompt: str) -> List[Dict[str, Any]]:
                     detailed_logs.append(current_message)
                     current_message = None
                 
+                # Emit tool call events for real-time display
+                if on_event:
+                    for tl in _tool_call_logs[last_tool_log_index:]:
+                        if tl["type"] == "ToolCallRequestMessage":
+                            for tc in tl["data"]["tool_calls"]:
+                                import json
+                                try:
+                                    args_dict = json.loads(tc["arguments"])
+                                except (json.JSONDecodeError, TypeError):
+                                    args_dict = {}
+                                on_event({
+                                    "type": "tool_call",
+                                    "source": tl["data"]["source"],
+                                    "tool_name": tc["name"],
+                                    "arguments": args_dict
+                                })
+                        elif tl["type"] == "ToolCallResultMessage":
+                            for res in tl["data"]["tool_call_results"]:
+                                on_event({
+                                    "type": "tool_result",
+                                    "source": tl["data"]["source"],
+                                    "tool_name": res["name"],
+                                    "content": res["content"],
+                                    "is_error": res["is_error"]
+                                })
+                
                 # Insert new tool logs
                 detailed_logs.extend(_tool_call_logs[last_tool_log_index:])
                 last_tool_log_index = len(_tool_call_logs)
             
             # Map Agent Framework events to the expected log format
             if hasattr(event, 'text') and event.text:
+                # Emit streaming token event for real-time display
+                if on_event:
+                    on_event({"type": "streaming_token", "source": current_source, "content": event.text})
+                
                 # Accumulate streaming tokens into complete messages
                 if current_message is not None:
                     current_message["data"]["content"] += event.text

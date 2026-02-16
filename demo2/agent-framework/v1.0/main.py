@@ -222,13 +222,14 @@ def create_agent_team():
     return client, workflow
 
 
-async def run_chat(workflow, prompt: str) -> List[Dict[str, Any]]:
+async def run_chat(workflow, prompt: str, on_event=None) -> List[Dict[str, Any]]:
     """
     Run the workflow for a given prompt and collect detailed event logs.
     
     Args:
         workflow: The workflow instance to use
         prompt: The user prompt to process
+        on_event: Optional callback function for real-time event streaming
         
     Returns:
         List of dictionaries representing detailed event logs
@@ -256,6 +257,10 @@ async def run_chat(workflow, prompt: str) -> List[Dict[str, Any]]:
             
             # Track which agent is currently active
             if hasattr(event, 'executor_id') and event.executor_id:
+                if current_agent != event.executor_id:
+                    # Emit agent change event for real-time display
+                    if on_event:
+                        on_event({"type": "agent_change", "agent_name": event.executor_id})
                 current_agent = event.executor_id
             
             # Check if there are new tool logs to inject
@@ -266,12 +271,42 @@ async def run_chat(workflow, prompt: str) -> List[Dict[str, Any]]:
                     current_message = None
                     current_source = None
                 
+                # Emit tool call events for real-time display
+                if on_event:
+                    for tl in _tool_call_logs[last_tool_log_index:]:
+                        if tl["type"] == "ToolCallRequestMessage":
+                            for tc in tl["data"]["tool_calls"]:
+                                import json
+                                try:
+                                    args_dict = json.loads(tc["arguments"])
+                                except (json.JSONDecodeError, TypeError):
+                                    args_dict = {}
+                                on_event({
+                                    "type": "tool_call",
+                                    "source": tl["data"]["source"],
+                                    "tool_name": tc["name"],
+                                    "arguments": args_dict
+                                })
+                        elif tl["type"] == "ToolCallResultMessage":
+                            for res in tl["data"]["tool_call_results"]:
+                                on_event({
+                                    "type": "tool_result",
+                                    "source": tl["data"]["source"],
+                                    "tool_name": res["name"],
+                                    "content": res["content"],
+                                    "is_error": res["is_error"]
+                                })
+                
                 # Insert new tool logs
                 detailed_logs.extend(_tool_call_logs[last_tool_log_index:])
                 last_tool_log_index = len(_tool_call_logs)
             
             # Map Agent Framework events to the expected log format
             if hasattr(event, 'text') and event.text and current_agent:
+                # Emit streaming token event for real-time display
+                if on_event:
+                    on_event({"type": "streaming_token", "source": current_agent, "content": event.text})
+                
                 # Accumulate streaming tokens into complete messages
                 if current_source == current_agent and current_message is not None:
                     current_message["data"]["content"] += event.text
@@ -315,6 +350,21 @@ async def run_chat(workflow, prompt: str) -> List[Dict[str, Any]]:
                     }
                 }
                 detailed_logs.append(log_entry)
+                
+                # Emit tool call events for real-time display
+                if on_event:
+                    import json
+                    for tc in event.tool_calls:
+                        try:
+                            args_dict = json.loads(getattr(tc, 'arguments', '{}'))
+                        except (json.JSONDecodeError, TypeError):
+                            args_dict = {}
+                        on_event({
+                            "type": "tool_call",
+                            "source": current_agent or "unknown",
+                            "tool_name": getattr(tc, 'name', 'unknown'),
+                            "arguments": args_dict
+                        })
             
             # Check for tool results
             if hasattr(event, 'tool_results') and event.tool_results:
@@ -342,6 +392,17 @@ async def run_chat(workflow, prompt: str) -> List[Dict[str, Any]]:
                     }
                 }
                 detailed_logs.append(log_entry)
+                
+                # Emit tool result events for real-time display
+                if on_event:
+                    for res in event.tool_results:
+                        on_event({
+                            "type": "tool_result",
+                            "source": current_agent or "unknown",
+                            "tool_name": getattr(res, 'name', 'unknown'),
+                            "content": getattr(res, 'content', ''),
+                            "is_error": getattr(res, 'is_error', False)
+                        })
         
         # Don't forget to append the last accumulated message
         if current_message is not None:

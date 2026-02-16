@@ -488,22 +488,13 @@ def main():
         
     # This function is now called after st.set_page_config()
     
-    # --- Sidebar for Demo and Framework Selection ---
+    # --- Sidebar for Demo Selection ---
     st.sidebar.title("Demo Selection")
     
-    # Framework selector
-    framework_options = {
-        "autogen": "Autogen v0.4",
-        "agent-framework": "Agent Framework v1.0"
-    }
-    current_framework = st.session_state.get("selected_framework", DEFAULT_FRAMEWORK)
-    selected_framework = st.sidebar.radio(
-        "Choose Framework:",
-        options=list(framework_options.keys()),
-        format_func=lambda fw: framework_options.get(fw, "Unknown"),
-        key="framework_selector",
-        index=0 if current_framework == "autogen" else 1
-    )
+    # Framework is fixed to Autogen v0.4 (selector hidden)
+    selected_framework = st.session_state.get("selected_framework", DEFAULT_FRAMEWORK)
+    if "selected_framework" not in st.session_state:
+        st.session_state.selected_framework = DEFAULT_FRAMEWORK
     
     # Demo selector
     demo_options = {demo_id: config["name"] for demo_id, config in DEMO_CONFIG.items()}
@@ -531,20 +522,16 @@ def main():
             st.sidebar.warning(f"Image file not found: {image_path}")
     # --- End Display Demo Image in Sidebar ---
 
-    # --- Handle Demo or Framework Change ---
+    # --- Handle Demo Change ---
     demo_changed = st.session_state.get("selected_demo") != selected_demo_id
-    framework_changed = st.session_state.get("selected_framework") != selected_framework
     
-    if demo_changed or framework_changed:
+    if demo_changed:
         st.session_state.selected_demo = selected_demo_id
-        st.session_state.selected_framework = selected_framework
         reset_chat_state()
         st.rerun()
 
     if "selected_demo" not in st.session_state:
         st.session_state.selected_demo = selected_demo_id
-    if "selected_framework" not in st.session_state:
-        st.session_state.selected_framework = selected_framework
 
     # --- Show Embedding UI for Demo 4 in Sidebar ---
     if st.session_state.selected_demo == "demo4":
@@ -636,13 +623,80 @@ def main():
         # Use the run_chat_func stored from the SAME module load as create_agent_team
         # This ensures tool log globals (_tool_call_logs) are shared between tools and run_chat
         run_chat_func = st.session_state.agent_components.get("run_chat_func")
-        with st.spinner(f"Processing..."):
+        
+        if not run_chat_func:
+            st.error(f"Could not find run_chat function. Please refresh the page.")
+            st.stop()
+        
+        # Create live streaming display with st.status
+        with st.chat_message("assistant", avatar="🤖"):
+            status = st.status("Processing...", expanded=True)
+            text_placeholder = status.empty()
+            accumulated_text = ""
+            current_agent = None
+            
+            def handle_event(event):
+                nonlocal accumulated_text, text_placeholder, current_agent
+                etype = event.get("type")
+                
+                if etype == "streaming_token":
+                    source = event.get("source")
+                    if source != current_agent:
+                        # Finalize previous text block
+                        if accumulated_text:
+                            text_placeholder.markdown(accumulated_text)
+                        current_agent = source
+                        accumulated_text = ""
+                        status.markdown(f"**{source}** is thinking...")
+                        text_placeholder = status.empty()
+                    accumulated_text += event.get("content", "")
+                    text_placeholder.markdown(accumulated_text + " ▌")
+                
+                elif etype == "tool_call":
+                    if accumulated_text:
+                        text_placeholder.markdown(accumulated_text)
+                        accumulated_text = ""
+                    tool_name = event.get("tool_name", "unknown")
+                    status.markdown(f"🛠️ **Calling** `{tool_name}`")
+                    args = event.get("arguments", {})
+                    if tool_name == "execute_python_code" and "code" in args:
+                        status.code(args["code"], language="python")
+                    elif tool_name == "query_qdrant_documentation" and "query" in args:
+                        status.markdown(f"📚 Query: {args['query']}")
+                    else:
+                        status.json(args)
+                    text_placeholder = status.empty()
+                
+                elif etype == "tool_result":
+                    is_error = event.get("is_error", False)
+                    tool_name = event.get("tool_name", "unknown")
+                    if is_error:
+                        status.error(f"❌ Tool error: {tool_name}")
+                        content_str = str(event.get("content", ""))[:500]
+                        status.code(content_str, language="text")
+                    else:
+                        status.success(f"✅ {tool_name} completed")
+                        # Show truncated preview for non-code execution tools
+                        if tool_name != "execute_python_code":
+                            content_str = str(event.get("content", ""))
+                            if len(content_str) > 300:
+                                status.markdown(f"*Result preview:* {content_str[:300]}...")
+                    text_placeholder = status.empty()
+                
+                elif etype == "agent_change":
+                    agent_name = event.get("agent_name", "unknown")
+                    status.markdown(f"---\n**🔄 Agent selected:** {agent_name}")
+                    current_agent = agent_name
+                    accumulated_text = ""
+                    text_placeholder = status.empty()
+            
             try:
-                if not run_chat_func:
-                    st.error(f"Could not find run_chat function. Please refresh the page.")
-                    st.stop()
-                     
-                detailed_logs = asyncio.run(run_chat_func(group_chat, user_prompt))
+                detailed_logs = asyncio.run(run_chat_func(group_chat, user_prompt, on_event=handle_event))
+                
+                # Finalize accumulated text
+                if accumulated_text:
+                    text_placeholder.markdown(accumulated_text)
+                status.update(label="Processing complete", state="complete", expanded=False)
 
                 # --- Analyze logs for summary --- 
                 agent_turns = 0
@@ -691,6 +745,7 @@ def main():
                 
                 st.rerun()
             except Exception as e:
+                status.update(label="Error occurred", state="error", expanded=True)
                 st.error(f"An error occurred during processing: {e}")
                 st.error(f"Traceback: {traceback.format_exc()}")
                 st.session_state["internal_messages"] = [{"role": "system", "content": f"Error: {e}"}]
