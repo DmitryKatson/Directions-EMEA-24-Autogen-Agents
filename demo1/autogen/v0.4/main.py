@@ -14,8 +14,10 @@ from autogen_core import CancellationToken
 
 # Load environment variables when the module is imported
 # Try to load from streamlit directory first, then from root
-streamlit_env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'streamlit', '.env')
-root_env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), '.env')
+# Note: We're now 4 levels deep (demo1/autogen/v0.4/main.py), so we need 4 dirname() calls
+workspace_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+streamlit_env_path = os.path.join(workspace_root, 'streamlit', '.env')
+root_env_path = os.path.join(workspace_root, '.env')
 
 if os.path.exists(streamlit_env_path):
     dotenv.load_dotenv(streamlit_env_path)
@@ -101,25 +103,45 @@ async def run_chat(group_chat, prompt: str) -> List[Dict[str, Any]]:
     
     stream = group_chat.run_stream(task=prompt)
     
+    # Track current message being accumulated from streaming tokens
+    current_message = None
+    current_source = None
+    
     async for event_data in stream:
         event_type_name = type(event_data).__name__
-        log_entry = {"type": event_type_name, "data": None}
         # Safely get source name
         source_name = getattr(getattr(event_data, 'source', None), 'name', str(getattr(event_data, 'source', 'unknown')))
 
         if event_type_name == "TextMessage" or isinstance(event_data, TextMessage):
-            # Special handling for CodeExecutorAgent messages which might contain code blocks
+            # Accumulate streaming tokens into complete messages
             content = event_data.to_text()
-            log_entry["data"] = {
-                "source": source_name,
-                "content": content
-            }
-        # Demo 1 doesn't use tools, so no need for ToolCallRequest/Result handling
-        # But we can add a placeholder if needed later
-        # elif event_type_name == "ToolCallRequestMessage": ... 
-        # elif event_type_name == "ToolCallResultMessage": ...
+            
+            # If this is from the same source, accumulate the content
+            if current_source == source_name and current_message is not None:
+                current_message["data"]["content"] += content
+            else:
+                # Save previous message if it exists
+                if current_message is not None:
+                    detailed_logs.append(current_message)
+                
+                # Start new message
+                current_message = {
+                    "type": "TextMessage",
+                    "data": {
+                        "source": source_name,
+                        "content": content
+                    }
+                }
+                current_source = source_name
         else:
+            # For non-text messages, save current accumulated message first
+            if current_message is not None:
+                detailed_logs.append(current_message)
+                current_message = None
+                current_source = None
+            
             # Catch-all for other types (like CodeExecution*) 
+            log_entry = {"type": event_type_name, "data": None}
             try:
                 # Try to get code execution details if available
                 if event_type_name.startswith("CodeExecution") and hasattr(event_data, 'execution_result'):
@@ -134,7 +156,11 @@ async def run_chat(group_chat, prompt: str) -> List[Dict[str, Any]]:
             except (AttributeError, TypeError):
                    log_entry["data"] = repr(event_data) # Fallback
 
-        detailed_logs.append(log_entry)
+            detailed_logs.append(log_entry)
+    
+    # Don't forget to append the last accumulated message
+    if current_message is not None:
+        detailed_logs.append(current_message)
             
     print(f"--- run_chat finished. Collected {len(detailed_logs)} detailed logs. ---")
     return detailed_logs

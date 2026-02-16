@@ -3,10 +3,15 @@ autogen_agentchat
 autogen-ext[openai]
 streamlit
 
+# Agent Framework
+agent-framework --pre
+azure-identity
+
 # Demo 4 RAG requirements
 python-dotenv
 PyPDF2
 qdrant-client
+langchain-core
 langchain-openai
 openai
 tenacity

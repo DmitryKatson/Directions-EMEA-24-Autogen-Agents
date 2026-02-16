@@ -1,6 +1,7 @@
 python-dotenv
 PyPDF2
 qdrant-client
+langchain-core
 langchain-openai
 openai
 tenacity

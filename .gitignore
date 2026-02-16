@@ -160,4 +160,4 @@ cython_debug/
 #.idea/
 
 *.pdf
-*/*/coding/*
+**/coding/tmp_code_*

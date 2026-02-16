@@ -6,85 +6,113 @@ import json
 import re
 import ast
 import traceback
-import time # Import time if not already present
+import time
+import importlib
 
 # --- Set Page Config (Must be the FIRST Streamlit command) ---
 st.set_page_config(page_title="AutoGen BC API Demos", page_icon="🤖", layout="wide")
 
 # --- Path Setup for Imports ---
-# Add workspace root to path
 workspace_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if workspace_root not in sys.path:
     sys.path.insert(0, workspace_root)
 
-# Explicitly add demo subdirectories to path to help resolve relative imports within them
-demo3_v04_path = os.path.join(workspace_root, "demo3", "v04")
-if demo3_v04_path not in sys.path:
-    sys.path.insert(0, demo3_v04_path)
+
+def load_demo_module(demo_id: str, framework: str):
+    """
+    Dynamically load a demo module using importlib.
     
-demo4_v04_path = os.path.join(workspace_root, "demo4", "v04")
-if demo4_v04_path not in sys.path:
-    sys.path.insert(0, demo4_v04_path)
+    Args:
+        demo_id: The demo ID (e.g., 'demo1')
+        framework: The framework type ('autogen' or 'agent-framework')
+        
+    Returns:
+        Tuple of (create_agent_team function, run_chat function) or (None, None) on error
+    """
+    try:
+        # Determine version path based on framework
+        if framework == "autogen":
+            version_path = "v0.4"
+        else:  # agent-framework
+            version_path = "v1.0"
+        
+        # Build the full path to the version directory
+        module_dir = os.path.join(workspace_root, demo_id, framework, version_path)
+        
+        if not os.path.exists(module_dir):
+            st.error(f"Module directory not found: {module_dir}")
+            return None, None
+        
+        # Add the module directory to sys.path if not already there
+        if module_dir not in sys.path:
+            sys.path.insert(0, module_dir)
+        
+        # Clear cached demo modules to prevent cross-contamination between
+        # frameworks/demos that share module names (e.g., bc_api_tool exists in
+        # both autogen and agent-framework versions with different decorators)
+        demo_modules_to_clear = ['main', 'bc_api_tool']
+        for mod_name in demo_modules_to_clear:
+            if mod_name in sys.modules:
+                del sys.modules[mod_name]
+        
+        main_module = importlib.import_module('main')
+        
+        # Extract the functions
+        create_func = getattr(main_module, 'create_agent_team', None)
+        run_func = getattr(main_module, 'run_chat', None)
+        
+        if not create_func or not run_func:
+            st.error(f"Required functions not found in {demo_id}/{framework}/{version_path}/main.py")
+            return None, None
+        
+        return create_func, run_func
+        
+    except ImportError as e:
+        st.error(f"Failed to import {demo_id} ({framework}): {e}")
+        st.error(f"Traceback: {traceback.format_exc()}")
+        return None, None
+    except Exception as e:
+        st.error(f"Error loading {demo_id} ({framework}): {e}")
+        st.error(f"Traceback: {traceback.format_exc()}")
+        return None, None
 
-# --- Import Demo Functions Directly ---
-try:
-    from demo1.v04.main import create_agent_team as create_demo1_team, run_chat as run_demo1_chat
-except ImportError as e:
-    st.error(f"Failed to import Demo 1: {e}. Ensure demo1/v04/main.py exists and is importable.")
-    create_demo1_team, run_demo1_chat = None, None
-
-try:
-    from demo2.v04.main import create_agent_team as create_demo2_team, run_chat as run_demo2_chat
-except ImportError as e:
-    st.error(f"Failed to import Demo 2: {e}. Ensure demo2/v04/main.py exists and is importable.")
-    create_demo2_team, run_demo2_chat = None, None
-
-try:
-    # Now that demo3/v04 is in the path, the relative import inside main.py should work
-    from demo3.v04.main import create_agent_team as create_demo3_team, run_chat as run_demo3_chat
-except ImportError as e:
-    st.error(f"Failed to import Demo 3: {e}. Ensure demo3/v04/main.py and demo3/v04/bc_api_tool.py exist and are importable.")
-    create_demo3_team, run_demo3_chat = None, None
-
-try:
-    # Now that demo4/v04 is in the path, the relative import inside main.py should work
-    from demo4.v04.main import create_agent_team as create_demo4_team, run_chat as run_demo4_chat
-except ImportError as e:
-    st.error(f"Failed to import Demo 4: {e}. Ensure demo4/v04/main.py and demo4/v04/bc_api_tool.py exist and are importable.")
-    create_demo4_team, run_demo4_chat = None, None
-
-# --- Configuration (Paths are no longer needed) ---
+# --- Configuration ---
 DEMO_CONFIG = {
     "demo1": {
         "name": "Demo 1 (Simple Agent): Code + Executor",
         "prompts": ["Show me cash accounts"],
-        "caption": "Using AssistantAgent + CodeExecutorAgent (2 Agents)",
-        "create_func": create_demo1_team,
-        "run_func": run_demo1_chat
+        "captions": {
+            "autogen": "Autogen v0.4: AssistantAgent + CodeExecutorAgent (2 Agents)",
+            "agent-framework": "Agent Framework v1.0: Single Agent with execute_python_code tool"
+        }
     },
     "demo2": {
         "name": "Demo 2 (Team of Agents): Manager + Coder + Executor + Composer",
-        "prompts": ["List me all unpaid invoices since the beginning of the year", "Show me cash accounts"],
-        "caption": "Using SelectorGroupChat (3 Agents, LLM selects next)",
-        "create_func": create_demo2_team,
-        "run_func": run_demo2_chat
+        "prompts": ["Show me cash accounts"],
+        "captions": {
+            "autogen": "Autogen v0.4: SelectorGroupChat (3 Agents, LLM selects next)",
+            "agent-framework": "Agent Framework v1.0: GroupChatBuilder (2 Agents + Orchestrator)"
+        }
     },
     "demo3": {
         "name": "Demo 3: Agent + Tool",
         "prompts": ["Which customers owes money to the company?"],
-        "caption": "Using AssistantAgent with a custom Tool (1 Agent)",
-        "create_func": create_demo3_team,
-        "run_func": run_demo3_chat
+        "captions": {
+            "autogen": "Autogen v0.4: AssistantAgent with custom Tool (1 Agent)",
+            "agent-framework": "Agent Framework v1.0: Single Agent with @tool decorator"
+        }
     },
     "demo4": {
         "name": "Demo 4: Agent + RAG + Tool",
         "prompts": ["Which customers owes money to the company?"],
-        "caption": "Using AssistantAgent with RAG and API Tool (1 Agent)",
-        "create_func": create_demo4_team,
-        "run_func": run_demo4_chat
+        "captions": {
+            "autogen": "Autogen v0.4: AssistantAgent with RAG and API Tool (1 Agent)",
+            "agent-framework": "Agent Framework v1.0: Single Agent with RAG + @tool"
+        }
     }
 }
 DEFAULT_DEMO = "demo1"
+DEFAULT_FRAMEWORK = "autogen"
 
 # --- Constants for Final Answer Agent Names ---
 FINAL_ANSWER_AGENTS = {
@@ -96,10 +124,10 @@ FINAL_ANSWER_AGENTS = {
 
 # --- Constants for Demo Images (relative to this app.py file) ---
 DEMO_IMAGES = {
-    "demo1": "../demo1/v04/demo1.png",
-    "demo2": "../demo2/v04/demo2.png",
-    "demo3": "../demo3/v04/demo3.png",
-    "demo4": "../demo4/v04/demo4.png",
+    "demo1": "../demo1/autogen/v0.4/demo1.png",
+    "demo2": "../demo2/autogen/v0.4/demo2.png",
+    "demo3": "../demo3/autogen/v0.4/demo3.png",
+    "demo4": "../demo4/autogen/v0.4/demo4.png",
 }
 
 # --- Utility Functions (load_demo_module removed) ---
@@ -108,21 +136,18 @@ DEMO_IMAGES = {
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
-def get_demo_functions(demo_id):
-    """Returns the create_agent_team and run_chat functions for the selected demo."""
-    config = DEMO_CONFIG.get(demo_id)
-    if not config:
-        st.error(f"Invalid demo ID: {demo_id}")
-        return None, None
-
-    create_func = config.get('create_func')
-    run_func = config.get('run_func')
+def get_demo_functions(demo_id, framework):
+    """
+    Returns the create_agent_team and run_chat functions for the selected demo and framework.
     
-    if not create_func or not run_func:
-        st.error(f"Functions not loaded for Demo ID: {demo_id}. Check imports.")
-        return None, None
+    Args:
+        demo_id: The demo ID (e.g., 'demo1')
+        framework: The framework type ('autogen' or 'agent-framework')
         
-    return create_func, run_func
+    Returns:
+        Tuple of (create_func, run_func) or (None, None) on error
+    """
+    return load_demo_module(demo_id, framework)
 
 def display_message(message_or_log):
     """Displays messages (simple format) or detailed log entries (new format)."""
@@ -223,11 +248,19 @@ def display_message(message_or_log):
             tool_calls = log_data.get("tool_calls", [])
             if not tool_calls: st.markdown("_(No tool calls found in data)_")
             for tc in tool_calls:
-                st.markdown(f"* **Tool:** `{tc.get('name', 'unknown_tool')}` (ID: `{tc.get('id')}`)")
+                tool_name = tc.get('name', 'unknown_tool')
+                st.markdown(f"* **Tool:** `{tool_name}` (ID: `{tc.get('id')}`)")
                 try:
                     # Attempt to parse arguments if they are a JSON string
-                    args_dict = json.loads(tc.get('arguments', '{}')) 
-                    st.code(json.dumps(args_dict, indent=2), language='json')
+                    args_dict = json.loads(tc.get('arguments', '{}'))
+                    
+                    # Special handling for execute_python_code tool - show code nicely
+                    if tool_name == 'execute_python_code' and 'code' in args_dict:
+                        st.markdown("**Generated Python Code:**")
+                        st.code(args_dict['code'], language='python')
+                    else:
+                        # For other tools, show JSON
+                        st.code(json.dumps(args_dict, indent=2), language='json')
                 except (json.JSONDecodeError, TypeError):
                      # Otherwise, display raw arguments
                     st.text(f"Arguments: {tc.get('arguments', {})}")
@@ -257,16 +290,28 @@ def display_message(message_or_log):
                          st.code(content, language='text')
                  else:
                       st.success(f"**Log: Tool Result ({tool_name} - ID: {call_id})**")
-                      try:
-                         content_data = json.loads(content)
-                         st.json(content_data)
-                      except (json.JSONDecodeError, TypeError):
-                          if isinstance(content, str) and len(content) > 500:
-                              st.text_area("Result Content:", value=content, height=200)
-                          elif isinstance(content, str):
-                              st.markdown(f"```\n{content}\n```")
+                      # Special handling for execute_python_code - show as execution output
+                      if tool_name == 'execute_python_code':
+                          if isinstance(content, str):
+                              # Show execution output in a code block
+                              if len(content) > 500:
+                                  st.text_area("Execution Output:", value=content, height=200, disabled=True)
+                              else:
+                                  st.code(content, language='text')
                           else:
-                              st.text(f"Result: {content}") # Fallback for non-string content
+                              st.text(f"Result: {content}")
+                      else:
+                          # For other tools, try to parse as JSON first
+                          try:
+                             content_data = json.loads(content)
+                             st.json(content_data)
+                          except (json.JSONDecodeError, TypeError):
+                              if isinstance(content, str) and len(content) > 500:
+                                  st.text_area("Result Content:", value=content, height=200, disabled=True)
+                              elif isinstance(content, str):
+                                  st.markdown(f"```\n{content}\n```")
+                              else:
+                                  st.text(f"Result: {content}") # Fallback for non-string content
         
     else:
         # Fallback for other known or unknown log event types
@@ -443,8 +488,24 @@ def main():
         
     # This function is now called after st.set_page_config()
     
-    # --- Sidebar for Demo Selection ---
+    # --- Sidebar for Demo and Framework Selection ---
     st.sidebar.title("Demo Selection")
+    
+    # Framework selector
+    framework_options = {
+        "autogen": "Autogen v0.4",
+        "agent-framework": "Agent Framework v1.0"
+    }
+    current_framework = st.session_state.get("selected_framework", DEFAULT_FRAMEWORK)
+    selected_framework = st.sidebar.radio(
+        "Choose Framework:",
+        options=list(framework_options.keys()),
+        format_func=lambda fw: framework_options.get(fw, "Unknown"),
+        key="framework_selector",
+        index=0 if current_framework == "autogen" else 1
+    )
+    
+    # Demo selector
     demo_options = {demo_id: config["name"] for demo_id, config in DEMO_CONFIG.items()}
     default_index = 0
     current_selection = st.session_state.get("selected_demo", DEFAULT_DEMO)
@@ -470,14 +531,20 @@ def main():
             st.sidebar.warning(f"Image file not found: {image_path}")
     # --- End Display Demo Image in Sidebar ---
 
-    # --- Handle Demo Change ---
-    if st.session_state.get("selected_demo") != selected_demo_id:
+    # --- Handle Demo or Framework Change ---
+    demo_changed = st.session_state.get("selected_demo") != selected_demo_id
+    framework_changed = st.session_state.get("selected_framework") != selected_framework
+    
+    if demo_changed or framework_changed:
         st.session_state.selected_demo = selected_demo_id
+        st.session_state.selected_framework = selected_framework
         reset_chat_state()
         st.rerun()
 
     if "selected_demo" not in st.session_state:
-         st.session_state.selected_demo = selected_demo_id
+        st.session_state.selected_demo = selected_demo_id
+    if "selected_framework" not in st.session_state:
+        st.session_state.selected_framework = selected_framework
 
     # --- Show Embedding UI for Demo 4 in Sidebar ---
     if st.session_state.selected_demo == "demo4":
@@ -486,18 +553,15 @@ def main():
 
     # --- Load Config for Selected Demo ---
     if selected_demo_id not in DEMO_CONFIG:
-         st.error(f"Selected demo '{selected_demo_id}' is not configured.")
-         st.stop()
+        st.error(f"Selected demo '{selected_demo_id}' is not configured.")
+        st.stop()
     current_config = DEMO_CONFIG[selected_demo_id]
     st.title(current_config["name"])
-    st.caption(current_config["caption"])
     
-    # --- Get Demo Functions (using direct imports) ---
-    create_agent_team_func, run_chat_func = get_demo_functions(selected_demo_id)
-    if not create_agent_team_func or not run_chat_func:
-        st.error(f"Failed to load functions for demo '{selected_demo_id}'. Check imports at the top of the script.")
-        st.stop()
-
+    # Get caption based on selected framework
+    caption = current_config["captions"].get(selected_framework, "")
+    st.caption(caption)
+    
     # --- Example Prompts / Pills ---
     st.markdown("##### Try an example:")
     example_prompts = current_config["prompts"]
@@ -514,6 +578,12 @@ def main():
          st.session_state.messages = []
 
     if "agent_components" not in st.session_state:
+        # Only load demo module when we need to create the agent (avoids unnecessary
+        # module reloads on every Streamlit rerun and prevents module cache contamination)
+        create_agent_team_func, run_chat_func = get_demo_functions(selected_demo_id, selected_framework)
+        if not create_agent_team_func or not run_chat_func:
+            st.error(f"Failed to load functions for demo '{selected_demo_id}' with framework '{selected_framework}'. Check if files exist.")
+            st.stop()
         try:
             returned_items = create_agent_team_func()
             if returned_items is None:
@@ -523,7 +593,8 @@ def main():
             if group_chat is None:
                 st.error("Group chat is None. Check the create_agent_team function.")
                 st.stop()
-            st.session_state["agent_components"] = {"group_chat": group_chat}
+            # Store run_chat_func from the SAME module load to keep tool log references in sync
+            st.session_state["agent_components"] = {"group_chat": group_chat, "run_chat_func": run_chat_func}
         except ImportError as e:
              st.error(f"Import error during agent initialization for {current_config['name']}: {e}")
              st.error(f"Traceback: {traceback.format_exc()}")
@@ -556,18 +627,20 @@ def main():
             "internal_messages" not in st.session_state):
         user_prompt = st.session_state.messages[-1]["content"]
         selected_demo_id = st.session_state.get("selected_demo", DEFAULT_DEMO)
+        selected_framework = st.session_state.get("selected_framework", DEFAULT_FRAMEWORK)
 
         if "agent_components" not in st.session_state or "group_chat" not in st.session_state.agent_components:
             st.warning("Agent components not initialized. Please refresh or select a demo.")
             st.stop()
         group_chat = st.session_state.agent_components["group_chat"]
+        # Use the run_chat_func stored from the SAME module load as create_agent_team
+        # This ensures tool log globals (_tool_call_logs) are shared between tools and run_chat
+        run_chat_func = st.session_state.agent_components.get("run_chat_func")
         with st.spinner(f"Processing..."):
             try:
-                # Get the detailed logs from the run_chat function
-                run_chat_func = get_demo_functions(selected_demo_id)[1] # Get the specific run_chat func
                 if not run_chat_func:
-                     st.error(f"Could not find run_chat function for demo {selected_demo_id}")
-                     st.stop()
+                    st.error(f"Could not find run_chat function. Please refresh the page.")
+                    st.stop()
                      
                 detailed_logs = asyncio.run(run_chat_func(group_chat, user_prompt))
 

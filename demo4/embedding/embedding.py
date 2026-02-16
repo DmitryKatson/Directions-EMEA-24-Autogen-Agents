@@ -4,7 +4,7 @@ import dotenv
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, Filter, FilterSelector, FieldCondition, MatchValue
 from langchain_openai import AzureOpenAIEmbeddings
-from langchain.docstore.document import Document
+from langchain_core.documents import Document
 from tenacity import retry, wait_random_exponential, stop_after_attempt
 from langchain_qdrant import QdrantVectorStore  # Updated import
 from chunking import process_pdf  # Import the modified process_pdf function
