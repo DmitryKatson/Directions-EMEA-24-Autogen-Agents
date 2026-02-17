@@ -1,4 +1,5 @@
 import os
+import pickle
 import time
 import dotenv
 from qdrant_client import QdrantClient
@@ -26,7 +27,28 @@ elif os.path.exists(root_env_path):
     dotenv.load_dotenv(root_env_path)
 else:
     dotenv.load_dotenv()  # Fallback to default behavior
-script_dir = os.path.dirname(os.path.abspath(__file__)) # Keep for later use
+script_dir = os.path.dirname(os.path.abspath(__file__))  # Keep for later use
+
+# Default PDF cache (pre-parsed text + page images for fast demo)
+DEFAULT_PDF_BASENAME = "Business_Central_API_v2.0_Reference_2nd_Edition.pdf"
+CACHE_KEY = "Business_Central_API_v2.0_Reference_2nd_Edition"
+CACHE_DIR = os.path.join(script_dir, "cache", CACHE_KEY)
+
+
+def _load_default_cache():
+    """Load pre-generated chapter chunks and page images. Returns (chapter_chunks, page_images) or (None, None) if missing."""
+    chunks_path = os.path.join(CACHE_DIR, "chapter_chunks.pkl")
+    images_path = os.path.join(CACHE_DIR, "page_images.pkl")
+    if not os.path.isfile(chunks_path) or not os.path.isfile(images_path):
+        return None, None
+    try:
+        with open(chunks_path, "rb") as f:
+            chapter_chunks = pickle.load(f)
+        with open(images_path, "rb") as f:
+            page_images = pickle.load(f)
+        return chapter_chunks, page_images
+    except Exception:
+        return None, None
 
 def initialize_qdrant():
     print("Freeing my mind.. 🧘")
@@ -143,9 +165,19 @@ def process_and_embed_pdf(file_path, progress_callback=None):
     # First, prepare the collection
     prepare_collection(client, collection_name, file_name)
 
-    # Process PDF using the chunking algorithm from chunking.py, passing callback
-    chapter_chunks = process_pdf(file_path, progress_callback=progress_callback)
-    
+    # Use pre-generated cache for default BC API PDF if available
+    use_cache = file_name == DEFAULT_PDF_BASENAME
+    chapter_chunks = None
+    cached_page_images = None
+    if use_cache:
+        chapter_chunks, cached_page_images = _load_default_cache()
+        if chapter_chunks is not None and progress_callback:
+            progress_callback(0, 0, "Using cached document", cached_page_images=cached_page_images or [])
+
+    if chapter_chunks is None:
+        # Process PDF using the chunking algorithm from chunking.py, passing callback
+        chapter_chunks = process_pdf(file_path, progress_callback=progress_callback)
+
     # Create documents
     documents = [
         Document(

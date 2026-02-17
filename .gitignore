@@ -161,3 +161,6 @@ cython_debug/
 
 *.pdf
 **/coding/tmp_code_*
+
+# Demo 4: pre-generated cache for default BC API PDF (run prepare_default_cache.py to create)
+demo4/embedding/cache/

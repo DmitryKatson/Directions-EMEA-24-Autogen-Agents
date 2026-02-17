@@ -550,7 +550,14 @@ def main():
         # Define the extended callback function for progress updates with page images
         def update_progress_with_images(step, total_steps, description, **kwargs):
             progress = (step / total_steps) if total_steps > 0 else 0
-            progress_bar.progress(progress, text=f"{description} ({step}/{total_steps})")
+            progress_bar.progress(progress, text=f"{description} ({step}/{total_steps})" if total_steps else description)
+            
+            # Pre-filled cache for default PDF (skip extraction, use prepared images)
+            cached_page_images = kwargs.get('cached_page_images')
+            if cached_page_images is not None:
+                stored_page_images.extend(cached_page_images)
+                page_status_placeholder.markdown(f"**{description}**")
+                return
             
             # Handle page image display
             page_image_bytes = kwargs.get('page_image_bytes')
