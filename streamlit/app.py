@@ -443,39 +443,10 @@ def show_embedding_ui():
     # Button to start the embedding process
     if can_index:
         if st.button("Index Document"):
-            # Use st.progress with callback for detailed updates
-            progress_bar = st.progress(0, text="Starting indexing...")
-            
-            # Define the callback function for progress updates
-            def update_progress(step, total_steps, description):
-                progress = (step / total_steps) if total_steps > 0 else 0
-                progress_bar.progress(progress, text=f"{description} ({step}/{total_steps})")
-                
-            try:
-                # Import the embedding module dynamically
-                # Ensure the embedding directory itself is in the path
-                embedding_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "demo4", "embedding")
-                if embedding_dir not in sys.path:
-                    sys.path.insert(0, embedding_dir) # Add to front to prioritize
-                
-                # Now import the function
-                from embedding import process_and_embed_pdf
-                
-                # Process and embed the PDF - pass the callback function
-                process_and_embed_pdf(file_to_index, progress_callback=update_progress)
-                
-                # Update progress bar to 100% on completion
-                progress_bar.progress(100, text="Indexing Complete!")
-                st.success("Document indexing complete!") # Keep success message
-                
-            except ImportError as ie:
-                progress_bar.empty() # Remove progress bar on error
-                st.error(f"Import Error during embedding: {ie}. Check if 'embedding.py' exists in demo4/embedding.")
-                st.error(traceback.format_exc())
-            except Exception as e:
-                progress_bar.empty() # Remove progress bar on error
-                st.error(f"Error during indexing: {e}")
-                st.error(traceback.format_exc())
+            # Set state to trigger embedding on next rerun (two-phase approach)
+            st.session_state.embedding_in_progress = True
+            st.session_state.embedding_file_path = file_to_index
+            st.rerun()
     else:
         st.info("Please upload a document or use the default documentation to begin indexing.")
 
@@ -490,6 +461,12 @@ def main():
     
     # --- Sidebar for Demo Selection ---
     st.sidebar.title("Demo Selection")
+    
+    # Initialize embedding state variables
+    if "embedding_in_progress" not in st.session_state:
+        st.session_state.embedding_in_progress = False
+    if "embedding_file_path" not in st.session_state:
+        st.session_state.embedding_file_path = None
     
     # Framework is fixed to Autogen v0.4 (selector hidden)
     selected_framework = st.session_state.get("selected_framework", DEFAULT_FRAMEWORK)
@@ -548,6 +525,102 @@ def main():
     # Get caption based on selected framework
     caption = current_config["captions"].get(selected_framework, "")
     st.caption(caption)
+    
+    # --- Handle Embedding Process with Main-Screen Reading View (Demo 4 only) ---
+    if (st.session_state.selected_demo == "demo4" and 
+        st.session_state.get("embedding_in_progress") and 
+        st.session_state.get("embedding_file_path")):
+        
+        st.markdown("---")
+        st.subheader("📖 Agent is Reading Your Document...")
+        
+        # Create placeholders for the reading view (progress bar first, then images)
+        progress_bar = st.progress(0, text="Starting indexing...")
+        page_status_placeholder = st.empty()
+        
+        # Create centered container for the image
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            page_image_placeholder = st.empty()
+        
+        # Store page images during extraction to show during embedding
+        stored_page_images = []
+        current_page_index = [0]  # Use list to make it mutable in nested function
+        
+        # Define the extended callback function for progress updates with page images
+        def update_progress_with_images(step, total_steps, description, **kwargs):
+            progress = (step / total_steps) if total_steps > 0 else 0
+            progress_bar.progress(progress, text=f"{description} ({step}/{total_steps})")
+            
+            # Handle page image display
+            page_image_bytes = kwargs.get('page_image_bytes')
+            page_num = kwargs.get('page_num')
+            embedding_batch = kwargs.get('embedding_batch')
+            
+            if page_image_bytes and page_num:
+                # During text extraction: store images but don't display yet
+                stored_page_images.append((page_num, page_image_bytes))
+                page_status_placeholder.markdown(f"**Extracting text from page {page_num} of {total_steps}...**")
+            elif embedding_batch is not None and stored_page_images:
+                # During embedding: show multiple pages per batch to scroll through all pages
+                # Calculate how many pages to show per batch
+                num_pages = len(stored_page_images)
+                pages_to_show_per_batch = max(1, num_pages // total_steps) if total_steps > 0 else 5
+                
+                # Show multiple pages during this batch
+                import time
+                for i in range(pages_to_show_per_batch):
+                    if current_page_index[0] < num_pages:
+                        page_num_display, image_bytes = stored_page_images[current_page_index[0]]
+                        page_image_placeholder.image(image_bytes, caption=f"Page {page_num_display} of {num_pages}", width=480)
+                        page_status_placeholder.markdown(f"**{description} - Reviewing page {page_num_display}...**")
+                        current_page_index[0] += 1
+                        time.sleep(0.05)  # Small delay between page updates (50ms)
+                
+                # Loop back to start if we've gone through all pages
+                if current_page_index[0] >= num_pages:
+                    current_page_index[0] = 0
+            elif not page_image_bytes and page_num is None and embedding_batch is None:
+                # During chunking (no images to show)
+                page_status_placeholder.markdown(f"**{description}**")
+        
+        try:
+            # Import the embedding module dynamically
+            embedding_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "demo4", "embedding")
+            if embedding_dir not in sys.path:
+                sys.path.insert(0, embedding_dir)
+            
+            # Now import the function
+            from embedding import process_and_embed_pdf
+            
+            # Process and embed the PDF with extended callback
+            process_and_embed_pdf(st.session_state.embedding_file_path, progress_callback=update_progress_with_images)
+            
+            # Clear embedding state
+            st.session_state.embedding_in_progress = False
+            st.session_state.embedding_file_path = None
+            
+            # Show success and rerun to show normal UI
+            progress_bar.progress(1.0, text="Indexing Complete!")
+            st.success("Document indexing complete! You can now ask questions about the document.")
+            st.balloons()
+            
+            # Give user a moment to see success message before rerunning
+            import time
+            time.sleep(2)
+            st.rerun()
+            
+        except ImportError as ie:
+            st.session_state.embedding_in_progress = False
+            st.error(f"Import Error during embedding: {ie}. Check if 'embedding.py' exists in demo4/embedding.")
+            st.error(traceback.format_exc())
+        except Exception as e:
+            st.session_state.embedding_in_progress = False
+            st.error(f"Error during indexing: {e}")
+            st.error(traceback.format_exc())
+        
+        # Stop here during embedding; don't show chat UI
+        st.stop()
     
     # --- Example Prompts / Pills ---
     st.markdown("##### Try an example:")

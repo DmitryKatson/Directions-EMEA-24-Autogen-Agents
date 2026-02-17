@@ -10,6 +10,7 @@ azure-identity
 # Demo 4 RAG requirements
 python-dotenv
 PyPDF2
+pymupdf
 qdrant-client
 langchain-core
 langchain-openai

@@ -5,6 +5,16 @@ import os
 
 def extract_text_from_pdf(file_path, progress_callback=None):
     """Extracts text from PDF, calling progress_callback if provided."""
+    # Try to import PyMuPDF for rendering page images (optional)
+    try:
+        import pymupdf
+        pymupdf_available = True
+        # Open PDF with PyMuPDF for rendering (keep open for all pages)
+        pdf_doc = pymupdf.open(file_path)
+    except ImportError:
+        pymupdf_available = False
+        pdf_doc = None
+    
     with open(file_path, 'rb') as file:
         reader = PyPDF2.PdfReader(file)
         text = ""
@@ -18,10 +28,30 @@ def extract_text_from_pdf(file_path, progress_callback=None):
             # Clean page headers/footers
             page_text = clean_page_headers_and_footers(page_text)
             text += page_text + "\n"  # Add new lines between pages to avoid collisions
+            
+            # Render page to image if PyMuPDF is available
+            page_image_bytes = None
+            if progress_callback and pymupdf_available and pdf_doc:
+                try:
+                    # Render current page to image
+                    pymupdf_page = pdf_doc[i]
+                    # Use moderate DPI (150) to keep size reasonable while remaining readable
+                    pix = pymupdf_page.get_pixmap(dpi=150)
+                    page_image_bytes = pix.tobytes("png")
+                except Exception as e:
+                    print(f"Warning: Could not render page {i+1} to image: {e}")
+                    page_image_bytes = None
+            
             if progress_callback:
-                progress_callback(i + 1, num_pages, f"Extracting text from PDF page {i+1}/{num_pages}")
+                progress_callback(i + 1, num_pages, f"Extracting text from PDF page {i+1}/{num_pages}", 
+                                page_image_bytes=page_image_bytes, page_num=i+1)
         
         print("-" * 50)
+    
+    # Close PyMuPDF document if it was opened
+    if pdf_doc:
+        pdf_doc.close()
+    
     return text
 
 def clean_page_headers_and_footers(text):

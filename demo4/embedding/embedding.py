@@ -181,7 +181,8 @@ def process_and_embed_pdf(file_path, progress_callback=None):
             raise
         
         if progress_callback:
-            progress_callback(i + 1, num_batches, f"Embedding batch {i+1}/{num_batches}")
+            # Pass embedding_batch to signal we're in embedding phase (for image display)
+            progress_callback(i + 1, num_batches, f"Embedding batch {i+1}/{num_batches}", embedding_batch=i)
         
         # Add a small delay between batches to avoid rate limiting (except for the last batch)
         if i < num_batches - 1:
