@@ -140,6 +140,26 @@ def delete_vectors_by_source(client, collection_name, file_name):
     )
     # print(f"Deleted vectors with source: '{file_name}' from collection: '{collection_name}'")
 
+
+def collection_has_source(client, collection_name, file_name):
+    """Return True if the collection already has any points with metadata.source == file_name."""
+    try:
+        result, _ = client.scroll(
+            collection_name=collection_name,
+            scroll_filter=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="metadata.source",
+                        match=models.MatchValue(value=file_name)
+                    )
+                ]
+            ),
+            limit=1,
+        )
+        return len(result) > 0
+    except Exception:
+        return False
+
 @retry(wait=wait_random_exponential(min=1, max=10), stop=stop_after_attempt(6))
 def add_documents_to_qdrant(qdrant, documents):
     qdrant.add_documents(documents=documents)
@@ -162,9 +182,6 @@ def process_and_embed_pdf(file_path, progress_callback=None):
     # Initialize Qdrant
     qdrant, client, collection_name = initialize_qdrant()
 
-    # First, prepare the collection
-    prepare_collection(client, collection_name, file_name)
-
     # Use pre-generated cache for default BC API PDF if available
     use_cache = file_name == DEFAULT_PDF_BASENAME
     chapter_chunks = None
@@ -177,6 +194,19 @@ def process_and_embed_pdf(file_path, progress_callback=None):
     if chapter_chunks is None:
         # Process PDF using the chunking algorithm from chunking.py, passing callback
         chapter_chunks = process_pdf(file_path, progress_callback=progress_callback)
+
+    # Simulate embedding when default PDF + cache and collection already has this source (demo mode)
+    simulate_embedding = (
+        use_cache
+        and chapter_chunks is not None
+        and collection_has_source(client, collection_name, file_name)
+    )
+    if simulate_embedding:
+        print("Collection already has this document — simulating embedding (demo mode).")
+
+    # First, prepare the collection (delete existing vectors for this source) unless simulating
+    if not simulate_embedding:
+        prepare_collection(client, collection_name, file_name)
 
     # Create documents
     documents = [
@@ -194,19 +224,24 @@ def process_and_embed_pdf(file_path, progress_callback=None):
     document_batches = [documents[i:i + batch_size] for i in range(0, len(documents), batch_size)]
     num_batches = len(document_batches)
     
-    # Add documents to Qdrant in batches, using callback
+    # Add documents to Qdrant in batches, using callback (or simulate with delay)
     if progress_callback:
         progress_callback(0, num_batches, "Starting document embedding...")
         
     for i, batch in enumerate(document_batches):
         batch_start_time = time.time()
-        batch_size = len(batch)
-        print(f"Processing batch {i+1}/{num_batches} ({batch_size} documents)...")
+        batch_size_cur = len(batch)
+        print(f"Processing batch {i+1}/{num_batches} ({batch_size_cur} documents)...")
         
         try:
-            add_documents_to_qdrant(qdrant, batch)
-            batch_time = time.time() - batch_start_time
-            print(f"Batch {i+1}/{num_batches} completed in {batch_time:.2f} seconds")
+            if simulate_embedding:
+                time.sleep(2)  # Simulate "remembering" for demo
+                batch_time = time.time() - batch_start_time
+                print(f"Batch {i+1}/{num_batches} simulated in {batch_time:.2f} seconds")
+            else:
+                add_documents_to_qdrant(qdrant, batch)
+                batch_time = time.time() - batch_start_time
+                print(f"Batch {i+1}/{num_batches} completed in {batch_time:.2f} seconds")
         except Exception as e:
             batch_time = time.time() - batch_start_time
             print(f"Error in batch {i+1}/{num_batches} after {batch_time:.2f} seconds: {e}")
@@ -217,7 +252,7 @@ def process_and_embed_pdf(file_path, progress_callback=None):
             progress_callback(i + 1, num_batches, f"Embedding batch {i+1}/{num_batches}", embedding_batch=i)
         
         # Add a small delay between batches to avoid rate limiting (except for the last batch)
-        if i < num_batches - 1:
+        if not simulate_embedding and i < num_batches - 1:
             time.sleep(0.5)  # 500ms delay to help avoid rate limits
 
     print("-" * 50)
